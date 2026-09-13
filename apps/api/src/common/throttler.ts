@@ -16,22 +16,40 @@ return count
 `;
 
 export async function throttleCheck(key: string, ttlMs: number, limit: number): Promise<void> {
-  const redis = getRedisConnection();
-  const count = await redis.eval(INCR_SCRIPT, 1, `${PREFIX}${key}`, String(ttlMs)) as number;
-  if (count > limit) {
-    throw new HttpException('Too Many Requests', 429);
+  try {
+    const redis = getRedisConnection();
+    const count = await redis.eval(INCR_SCRIPT, 1, `${PREFIX}${key}`, String(ttlMs)) as number;
+    if (count > limit) {
+      throw new HttpException('Too Many Requests', 429);
+    }
+  } catch (err: any) {
+    // If Redis is unreachable, fail open: skip rate limiting rather than
+    // blocking legitimate traffic. A Redis outage should degrade brute-force
+    // protection, not take down login/register/OAuth/api-key creation entirely.
+    // An attacker can't cause a Redis outage on demand; locking out every real
+    // user because Redis hiccuped is a worse outcome than briefly unlimited attempts.
+    if (err instanceof HttpException) throw err;
+    console.error(`[throttle] Redis unavailable, failing open: ${err.message}`);
   }
 }
 
 export async function throttleReset(key: string): Promise<void> {
-  const redis = getRedisConnection();
-  await redis.del(`${PREFIX}${key}`);
+  try {
+    const redis = getRedisConnection();
+    await redis.del(`${PREFIX}${key}`);
+  } catch {
+    // Best-effort cleanup; swallow errors
+  }
 }
 
 export async function throttleClear(): Promise<void> {
-  const redis = getRedisConnection();
-  const keys = await redis.keys(`${PREFIX}*`);
-  if (keys.length > 0) {
-    await redis.del(...keys);
+  try {
+    const redis = getRedisConnection();
+    const keys = await redis.keys(`${PREFIX}*`);
+    if (keys.length > 0) {
+      await redis.del(...keys);
+    }
+  } catch {
+    // Best-effort cleanup; swallow errors
   }
 }

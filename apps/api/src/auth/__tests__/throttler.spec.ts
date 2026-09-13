@@ -244,4 +244,62 @@ describe('Throttler configuration (RULE 40)', () => {
       expect(await throttleCheck(keyB, ttl, limit)).toBeUndefined(); // no throw, count = 1
     });
   });
+
+  describe('Redis failure mode: fail-open', () => {
+    it('throttleCheck succeeds when Redis is unreachable', async () => {
+      const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+
+      let mockedThrottleCheck: typeof throttleCheck;
+      jest.isolateModules(() => {
+        jest.mock('@myplatform/queue', () => ({
+          getRedisConnection: () => ({
+            eval: () => { throw new Error('ECONNREFUSED 127.0.0.1:6379'); },
+            del: () => { throw new Error('ECONNREFUSED'); },
+            keys: () => { throw new Error('ECONNREFUSED'); },
+          }),
+        }));
+        const mod = require('../../common/throttler.js');
+        mockedThrottleCheck = mod.throttleCheck;
+      });
+
+      // Should NOT throw — fail open
+      await expect(mockedThrottleCheck!('test-key', 60_000, 5)).resolves.toBeUndefined();
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('[throttle] Redis unavailable, failing open'),
+      );
+      consoleSpy.mockRestore();
+    });
+
+    it('LoginThrottlerGuard passes when Redis is down', async () => {
+      let MockedGuard: typeof LoginThrottlerGuard;
+      jest.isolateModules(() => {
+        jest.mock('@myplatform/queue', () => ({
+          getRedisConnection: () => ({
+            eval: () => { throw new Error('ECONNREFUSED 127.0.0.1:6379'); },
+          }),
+        }));
+        const mod = require('../guards/login-throttler.guard.js');
+        MockedGuard = mod.LoginThrottlerGuard;
+      });
+
+      const guard = new MockedGuard!();
+      const ctx = {
+        switchToHttp: () => ({
+          getRequest: () => ({ ip: '127.0.0.1', body: { email: 'test@test.com' } }),
+        }),
+      } as any;
+
+      expect(await guard.canActivate(ctx)).toBe(true);
+    });
+  });
+
+  describe('HttpException from throttler is still thrown (not swallowed)', () => {
+    it('429 is thrown even after fail-open tests', async () => {
+      await throttleClear();
+      for (let i = 1; i <= 3; i++) {
+        await throttleCheck('swallow-test', 60_000, 3);
+      }
+      await expect(throttleCheck('swallow-test', 60_000, 3)).rejects.toThrow(HttpException);
+    });
+  });
 });

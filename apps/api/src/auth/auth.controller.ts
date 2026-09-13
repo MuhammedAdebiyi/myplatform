@@ -4,6 +4,7 @@ import { RegisterDto } from './dto/register.dto.js';
 import { LoginDto } from './dto/login.dto.js';
 import { LoginThrottlerGuard } from './guards/login-throttler.guard.js';
 import { RegisterThrottlerGuard } from './guards/register-throttler.guard.js';
+import { SessionGuard } from './guards/session.guard.js';
 import { CurrentUser, CurrentSessionId } from './decorators/current-user.decorator.js';
 
 @Controller('auth')
@@ -30,6 +31,7 @@ export class AuthController {
     );
   }
 
+  @UseGuards(SessionGuard)
   @Post('logout')
   logout(
     @CurrentSessionId() sessionId: string,
