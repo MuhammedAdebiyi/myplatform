@@ -3,10 +3,10 @@ import { throttleCheck } from '../common/throttler.js';
 
 @Injectable()
 export class ApiKeysThrottlerGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest();
     const tracker = req.apiKeyContext?.organizationId ?? req.user?.id ?? req.ip;
-    throttleCheck(`api-keys:${tracker}`, 60 * 60 * 1000, 10);
+    await throttleCheck(`api-keys:${tracker}`, 60 * 60 * 1000, 10);
     return true;
   }
 }

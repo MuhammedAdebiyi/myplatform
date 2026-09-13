@@ -3,9 +3,9 @@ import { throttleCheck } from '../common/throttler.js';
 
 @Injectable()
 export class OAuthThrottlerGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest();
-    throttleCheck(`oauth:${req.ip}`, 60 * 60 * 1000, 20);
+    await throttleCheck(`oauth:${req.ip}`, 60 * 60 * 1000, 20);
     return true;
   }
 }

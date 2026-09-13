@@ -19,6 +19,9 @@ importers:
       '@myplatform/database':
         specifier: workspace:^
         version: link:../../packages/database
+      '@myplatform/queue':
+        specifier: workspace:^
+        version: link:../../packages/queue
       '@myplatform/shared':
         specifier: workspace:^
         version: link:../../packages/shared

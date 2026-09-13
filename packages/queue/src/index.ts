@@ -3,7 +3,7 @@ import IORedis from 'ioredis';
 
 let connection: IORedis | null = null;
 
-function getConnection(): IORedis {
+export function getRedisConnection(): IORedis {
   if (!connection) {
     connection = new IORedis(process.env.REDIS_URL as string, {
       maxRetriesPerRequest: null,
@@ -13,7 +13,7 @@ function getConnection(): IORedis {
 }
 
 export function createQueue<T = unknown>(name: string, opts?: Partial<QueueOptions>) {
-  return new Queue<T>(name, { connection: getConnection(), ...opts });
+  return new Queue<T>(name, { connection: getRedisConnection(), ...opts });
 }
 
 export function createWorker<T = unknown>(
@@ -21,5 +21,5 @@ export function createWorker<T = unknown>(
   processor: (job: { data: T }) => Promise<void>,
   opts?: Partial<WorkerOptions>
 ) {
-  return new Worker<T>(name, processor, { connection: getConnection(), ...opts });
+  return new Worker<T>(name, processor, { connection: getRedisConnection(), ...opts });
 }

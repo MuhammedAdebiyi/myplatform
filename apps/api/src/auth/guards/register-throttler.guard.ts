@@ -3,9 +3,9 @@ import { throttleCheck } from '../../common/throttler.js';
 
 @Injectable()
 export class RegisterThrottlerGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest();
-    throttleCheck(`register:${req.ip}`, 60 * 60 * 1000, 3);
+    await throttleCheck(`register:${req.ip}`, 60 * 60 * 1000, 3);
     return true;
   }
 }
