@@ -1,0 +1,327 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────── enums ─────────────────────────
+
+enum AuthProvider {
+  GOOGLE
+  GITHUB
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum OrgRole {
+  OWNER
+  ADMIN
+  DEVELOPER
+  MEMBER
+  VIEWER
+}
+
+enum ActorType {
+  USER
+  API_KEY
+  SYSTEM
+}
+
+enum ServiceType {
+  WEB_SERVICE
+  WORKER
+  CRON_JOB
+  STATIC_SITE
+  PRIVATE_SERVICE
+}
+
+enum DeploymentStrategy {
+  RECREATE
+  ROLLING
+  BLUE_GREEN
+  CANARY
+}
+
+enum RestartPolicy {
+  ALWAYS
+  ON_FAILURE
+  NEVER
+}
+
+enum DeploymentStatus {
+  PENDING
+  BUILDING
+  DEPLOYING
+  HEALTHY
+  FAILED
+  ROLLED_BACK
+}
+
+// ───────────────────────── identity ─────────────────────────
+
+model User {
+  id            String      @id @default(cuid())
+  email         String      @unique
+  emailVerified Boolean     @default(false)
+  passwordHash  String?
+  name          String
+  status        UserStatus  @default(ACTIVE)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  lastLoginAt DateTime?
+
+  memberships       Membership[]
+  sessions          Session[]
+  apiKeysCreated    ApiKey[]          @relation("ApiKeyCreatedBy")
+  auditLogs         AuditLog[]        @relation("AuditActorUser")
+  accountIdentities AccountIdentity[]
+  linkAccounts      LinkAccount[]     @relation("LinkAccountUser")
+  linkedAccounts    LinkAccount[]     @relation("LinkAccountTarget")
+}
+
+model Session {
+  id         String    @id @default(cuid())
+  user       User      @relation(fields: [userId], references: [id])
+  userId     String
+  tokenHash  String    @unique
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime  @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+
+  @@index([userId, expiresAt])
+}
+
+// ───────────────────────── tenancy ─────────────────────────
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships Membership[]
+  projects    Project[]
+  apiKeys     ApiKey[]
+  auditLogs   AuditLog[]
+}
+
+model Membership {
+  id             String       @id @default(cuid())
+  user           User         @relation(fields: [userId], references: [id])
+  userId         String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+  role           OrgRole
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([userId, organizationId])
+  @@index([organizationId, role])
+}
+
+// ───────────────────────── machine auth ─────────────────────────
+
+model ApiKey {
+  id             String       @id @default(cuid())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+  createdBy      User         @relation("ApiKeyCreatedBy", fields: [createdById], references: [id])
+  createdById    String
+
+  name        String
+  keyPrefix   String   @unique
+  keyHash     String   @unique
+  permissions String[]
+  expiresAt   DateTime?
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  revokedAt   DateTime?
+
+  @@index([organizationId])
+}
+
+// ───────────────────────── audit ─────────────────────────
+
+model AuditLog {
+  id             String        @id @default(cuid())
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  organizationId String?
+
+  actorType    ActorType
+  actorUser    User?    @relation("AuditActorUser", fields: [actorUserId], references: [id])
+  actorUserId  String?
+  actorApiKeyId String?
+  actorSystemId String?
+
+  action       String
+  resourceType String
+  resourceId   String?
+  metadata     Json?
+
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([organizationId, createdAt])
+  @@index([resourceType, resourceId])
+}
+
+// ───────────────────────── oauth ─────────────────────────
+
+model AccountIdentity {
+  id                String       @id @default(cuid())
+  user              User         @relation(fields: [userId], references: [id])
+  userId            String
+  provider          AuthProvider
+  providerAccountId String
+  email             String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model OAuthState {
+  id               String        @id @default(cuid())
+  state            String        @unique
+  provider         AuthProvider
+  codeVerifier     String
+  redirectTo       String?
+  initiatingUserId String?
+  createdAt        DateTime      @default(now())
+  expiresAt        DateTime
+
+  @@index([expiresAt])
+}
+
+// ───────────────────────── account linking ─────────────────────────
+
+model LinkAccount {
+  id         String   @id @default(cuid())
+  user       User     @relation("LinkAccountUser", fields: [userId], references: [id])
+  userId     String
+  target     User     @relation("LinkAccountTarget", fields: [targetId], references: [id])
+  targetId   String
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, targetId])
+  @@index([targetId])
+}
+
+// ───────────────────────── resources (now tenant-scoped) ─────────────────────────
+
+model Project {
+  id             String       @id @default(cuid())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+  name           String
+  slug           String
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  services  Service[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId, createdAt])
+}
+
+model Service {
+  id             String  @id @default(cuid())
+  project        Project @relation(fields: [projectId], references: [id])
+  projectId      String
+  // denormalized for fast tenant-scoped lookups (RULE 10/26) — kept in sync
+  // with project.organizationId transactionally, never written independently
+  organizationId String
+
+  name   String
+  type   ServiceType
+  region String      @default("default")
+
+  repoUrl        String?
+  branch         String?
+  dockerfilePath String?
+  buildCommand   String?
+  startCommand   String?
+  image          String?
+
+  cpuRequest   Float @default(0.25)
+  cpuLimit     Float @default(1)
+  memRequestMb Int   @default(256)
+  memLimitMb   Int   @default(1024)
+  diskMb       Int   @default(1024)
+  replicas     Int   @default(1)
+
+  restartPolicy      RestartPolicy      @default(ON_FAILURE)
+  deploymentStrategy DeploymentStrategy @default(ROLLING)
+
+  envVars     EnvVar[]
+  domains     Domain[]
+  healthCheck HealthCheck?
+  deployments Deployment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, name])
+  @@index([organizationId])
+}
+
+model EnvVar {
+  id        String  @id @default(cuid())
+  service   Service @relation(fields: [serviceId], references: [id])
+  serviceId String
+  key       String
+  value     String
+  isSecret  Boolean @default(false)
+
+  @@unique([serviceId, key])
+}
+
+model Domain {
+  id        String  @id @default(cuid())
+  service   Service @relation(fields: [serviceId], references: [id])
+  serviceId String
+  hostname  String  @unique
+  isCustom  Boolean @default(false)
+}
+
+model HealthCheck {
+  id                 String  @id @default(cuid())
+  service            Service @relation(fields: [serviceId], references: [id])
+  serviceId          String  @unique
+  path               String  @default("/health")
+  intervalSeconds    Int     @default(10)
+  timeoutSeconds     Int     @default(5)
+  healthyThreshold   Int     @default(2)
+  unhealthyThreshold Int     @default(3)
+}
+
+model Deployment {
+  id              String           @id @default(cuid())
+  service         Service          @relation(fields: [serviceId], references: [id])
+  serviceId       String
+  status          DeploymentStatus @default(PENDING)
+  imageDigest     String?
+  commitSha       String?
+  previousRelease String?
+  configSnapshot  Json?
+  rollbackReason  String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([serviceId, createdAt])
+}
