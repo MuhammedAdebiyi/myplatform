@@ -2,11 +2,10 @@ import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
 import { throttleCheck } from '../common/throttler.js';
 
 @Injectable()
-export class ApiKeysThrottlerGuard implements CanActivate {
+export class OAuthThrottlerGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const req = context.switchToHttp().getRequest();
-    const tracker = req.apiKeyContext?.organizationId ?? req.user?.id ?? req.ip;
-    throttleCheck(`api-keys:${tracker}`, 60 * 60 * 1000, 10);
+    throttleCheck(`oauth:${req.ip}`, 60 * 60 * 1000, 20);
     return true;
   }
 }

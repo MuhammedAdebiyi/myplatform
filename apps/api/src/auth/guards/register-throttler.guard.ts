@@ -2,11 +2,10 @@ import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
 import { throttleCheck } from '../../common/throttler.js';
 
 @Injectable()
-export class LoginThrottlerGuard implements CanActivate {
+export class RegisterThrottlerGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const req = context.switchToHttp().getRequest();
-    const email = req.body?.email ?? 'unknown';
-    throttleCheck(`login:${req.ip}:${email}`, 15 * 60 * 1000, 5);
+    throttleCheck(`register:${req.ip}`, 60 * 60 * 1000, 3);
     return true;
   }
 }

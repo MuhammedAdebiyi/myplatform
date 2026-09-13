@@ -2,6 +2,7 @@ import { Controller, Get, Post, Delete, Query, Param, Req, Res, UnauthorizedExce
 import { OAuthService } from './oauth.service.js';
 import { AuthProvider } from '@myplatform/database';
 import { SessionGuard } from '../auth/guards/session.guard.js';
+import { OAuthThrottlerGuard } from './oauth-throttler.guard.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import type { CurrentUser as CurrentUserType } from '../auth/decorators/current-user.decorator.js';
 
@@ -9,6 +10,7 @@ import type { CurrentUser as CurrentUserType } from '../auth/decorators/current-
 export class OAuthController {
   constructor(private readonly oauthService: OAuthService) {}
 
+  @UseGuards(OAuthThrottlerGuard)
   @Get('google')
   async googleInit(@Req() req: any, @Res() res: any) {
     const { url } = await this.oauthService.createAuthorizationUrl(
@@ -18,6 +20,7 @@ export class OAuthController {
     res.redirect(url);
   }
 
+  @UseGuards(OAuthThrottlerGuard)
   @Get('google/callback')
   async googleCallback(
     @Query('code') code: string,
@@ -42,6 +45,7 @@ export class OAuthController {
     );
   }
 
+  @UseGuards(OAuthThrottlerGuard)
   @Get('github')
   async githubInit(@Req() req: any, @Res() res: any) {
     const { url } = await this.oauthService.createAuthorizationUrl(
@@ -51,6 +55,7 @@ export class OAuthController {
     res.redirect(url);
   }
 
+  @UseGuards(OAuthThrottlerGuard)
   @Get('github/callback')
   async githubCallback(
     @Query('code') code: string,

@@ -3,6 +3,7 @@ import { AuthService } from './auth.service.js';
 import { RegisterDto } from './dto/register.dto.js';
 import { LoginDto } from './dto/login.dto.js';
 import { LoginThrottlerGuard } from './guards/login-throttler.guard.js';
+import { RegisterThrottlerGuard } from './guards/register-throttler.guard.js';
 import { CurrentUser, CurrentSessionId } from './decorators/current-user.decorator.js';
 
 @Controller('auth')
@@ -19,6 +20,7 @@ export class AuthController {
     );
   }
 
+  @UseGuards(RegisterThrottlerGuard)
   @Post('register')
   register(@Body() dto: RegisterDto, @Req() req: any) {
     return this.authService.register(
