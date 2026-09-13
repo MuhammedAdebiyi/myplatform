@@ -1,10 +1,11 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { OAuthService } from './oauth.service.js';
 import { OAuthController } from './oauth.controller.js';
 import { AuditModule } from '../audit/audit.module.js';
+import { AuthModule } from '../auth/auth.module.js';
 
 @Module({
-  imports: [AuditModule],
+  imports: [AuditModule, forwardRef(() => AuthModule)],
   controllers: [OAuthController],
   providers: [OAuthService],
   exports: [OAuthService],

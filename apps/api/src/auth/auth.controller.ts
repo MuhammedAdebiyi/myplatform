@@ -1,25 +1,27 @@
-import { Body, Controller, Post, Req } from '@nestjs/common';
+import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service.js';
 import { RegisterDto } from './dto/register.dto.js';
 import { LoginDto } from './dto/login.dto.js';
+import { LoginThrottlerGuard } from './guards/login-throttler.guard.js';
 import { CurrentUser, CurrentSessionId } from './decorators/current-user.decorator.js';
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  @Post('register')
-  register(@Body() dto: RegisterDto, @Req() req: any) {
-    return this.authService.register(
+  @UseGuards(LoginThrottlerGuard)
+  @Post('login')
+  login(@Body() dto: LoginDto, @Req() req: any) {
+    return this.authService.login(
       dto,
       req.ip,
       req.headers['user-agent'],
     );
   }
 
-  @Post('login')
-  login(@Body() dto: LoginDto, @Req() req: any) {
-    return this.authService.login(
+  @Post('register')
+  register(@Body() dto: RegisterDto, @Req() req: any) {
+    return this.authService.register(
       dto,
       req.ip,
       req.headers['user-agent'],

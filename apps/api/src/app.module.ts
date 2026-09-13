@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module.js';
 import { OAuthModule } from './oauth/oauth.module.js';
 import { OrganizationsModule } from './organizations/organizations.module.js';
@@ -9,6 +11,20 @@ import { ServicesModule } from './services/services.module.js';
 
 @Module({
   imports: [
+    ThrottlerModule.forRoot({
+      throttlers: [
+        {
+          name: 'default',
+          ttl: 60_000,
+          limit: 100,
+          getTracker: async (req: Record<string, any>) => {
+            if (req.user?.id) return req.user.id;
+            if (req.apiKeyContext?.organizationId) return req.apiKeyContext.organizationId;
+            return req.ip;
+          },
+        },
+      ],
+    }),
     AuthModule,
     OAuthModule,
     OrganizationsModule,
@@ -16,6 +32,9 @@ import { ServicesModule } from './services/services.module.js';
     ApiKeysModule,
     ProjectsModule,
     ServicesModule,
+  ],
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule {}

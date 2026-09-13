@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiKeysService } from './api-keys.service.js';
+import { ApiKeysThrottlerGuard } from './api-keys-throttler.guard.js';
 import { CreateApiKeyDto } from './dto/create-api-key.dto.js';
 import { SessionGuard } from '../auth/guards/session.guard.js';
 import { ApiKeyGuard } from '../auth/guards/api-key.guard.js';
@@ -10,7 +11,7 @@ import { AuthContext } from '../auth/decorators/auth-context.decorator.js';
 import type { AuthContext as AuthContextType } from '../auth/decorators/auth-context.decorator.js';
 import { Permission } from '../rbac/permissions.js';
 
-@UseGuards(SessionGuard, ApiKeyGuard, OrganizationGuard)
+@UseGuards(SessionGuard, ApiKeyGuard, OrganizationGuard, ApiKeysThrottlerGuard)
 @Controller('organizations/:organizationId/api-keys')
 export class ApiKeysController {
   constructor(private readonly apiKeys: ApiKeysService) {}

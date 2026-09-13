@@ -1,9 +1,11 @@
-import { Body, Controller, Delete, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { OrganizationsService } from './organizations.service.js';
 import { CreateOrganizationDto } from './dto/create-organization.dto.js';
+import { SessionGuard } from '../auth/guards/session.guard.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import type { CurrentUser as CurrentUserType } from '../auth/decorators/current-user.decorator.js';
 
+@UseGuards(SessionGuard)
 @Controller('organizations')
 export class OrganizationsController {
   constructor(private readonly organizations: OrganizationsService) {}
