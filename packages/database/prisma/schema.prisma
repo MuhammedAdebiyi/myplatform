@@ -149,6 +149,8 @@ model ApiKey {
   lastUsedAt  DateTime?
   createdAt   DateTime  @default(now())
   revokedAt   DateTime?
+  rotatedAt   DateTime?
+  supersededById String?
 
   @@index([organizationId])
 }

@@ -354,4 +354,103 @@ describe('OAuth Security (RULE 33 adversarial tests)', () => {
       expect(prisma.oAuthState.delete).not.toHaveBeenCalled();
     });
   });
+
+  describe('RULE 35: Concurrent callback race condition (TOCTOU)', () => {
+    let fetchSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      // Mock fetch to simulate token exchange and user info
+      fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(async (url: string) => {
+        if (typeof url === 'string' && url.includes('googleapis.com/token')) {
+          return { ok: true, json: async () => ({ access_token: 'mock-token', token_type: 'Bearer', scope: '' }) } as any;
+        }
+        if (typeof url === 'string' && url.includes('googleapis.com/oauth2')) {
+          return { ok: true, json: async () => ({ sub: 'google-user-123', email: 'test@gmail.com', name: 'Test User' }) } as any;
+        }
+        return { ok: false, text: async () => 'not found' } as any;
+      });
+    });
+
+    afterEach(() => {
+      fetchSpy.mockRestore();
+    });
+
+    it('second request recovers gracefully when first wins the create race', async () => {
+      // State validation passes
+      (prisma.oAuthState.findUnique as jest.Mock).mockResolvedValue({
+        id: 'state-1', state: 'race-state', provider: AuthProvider.GOOGLE,
+        codeVerifier: 'verifier', expiresAt: new Date(Date.now() + 60000),
+      });
+      (prisma.oAuthState.delete as jest.Mock).mockResolvedValue({});
+
+      // Initial identity lookup returns null (race: both see null)
+      (prisma.accountIdentity.findUnique as jest.Mock)
+        .mockResolvedValueOnce(null)  // First request's initial lookup
+        .mockResolvedValueOnce(null)  // Second request's initial lookup
+        .mockResolvedValueOnce({      // Second request's retry after P2002
+          id: 'identity-1', userId: 'user-1',
+          user: { id: 'user-1', status: 'ACTIVE' },
+        });
+
+      // First request's transaction succeeds
+      (prisma.$transaction as jest.Mock)
+        .mockResolvedValueOnce({ sessionToken: 'token-1', userId: 'user-1' });
+
+      // Second request's transaction throws P2002
+      const p2002Error = new Error('Unique constraint failed') as any;
+      p2002Error.code = 'P2002';
+      (prisma.$transaction as jest.Mock)
+        .mockRejectedValueOnce(p2002Error);
+
+      // Session creation for the re-fetched existing user
+      (prisma.session.create as jest.Mock).mockResolvedValue({});
+      (prisma.user.update as jest.Mock).mockResolvedValue({});
+
+      // Run two concurrent callbacks
+      const [result1, result2] = await Promise.all([
+        oauthService.handleCallback(AuthProvider.GOOGLE, 'auth-code', 'race-state', '1.2.3.4', 'Chrome'),
+        oauthService.handleCallback(AuthProvider.GOOGLE, 'auth-code', 'race-state', '5.6.7.8', 'Firefox'),
+      ]);
+
+      // Both should succeed
+      expect(result1.sessionToken).toBeDefined();
+      expect(result2.sessionToken).toBeDefined();
+    });
+
+    it('second request re-fetches and returns the existing user after P2002', async () => {
+      const existingUser = {
+        id: 'identity-1', userId: 'user-existing',
+        user: { id: 'user-existing', status: 'ACTIVE' },
+      };
+
+      // Initial lookup: null
+      (prisma.accountIdentity.findUnique as jest.Mock)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(existingUser); // Retry after P2002
+
+      // State validation
+      (prisma.oAuthState.findUnique as jest.Mock).mockResolvedValue({
+        id: 'state-1', state: 'race-state', provider: AuthProvider.GOOGLE,
+        codeVerifier: 'verifier', expiresAt: new Date(Date.now() + 60000),
+      });
+      (prisma.oAuthState.delete as jest.Mock).mockResolvedValue({});
+
+      // Transaction throws P2002
+      const p2002Error = new Error('Unique constraint failed') as any;
+      p2002Error.code = 'P2002';
+      (prisma.$transaction as jest.Mock).mockRejectedValueOnce(p2002Error);
+
+      // Session creation for re-fetched user
+      (prisma.session.create as jest.Mock).mockResolvedValue({});
+      (prisma.user.update as jest.Mock).mockResolvedValue({});
+
+      const result = await oauthService.handleCallback(
+        AuthProvider.GOOGLE, 'auth-code', 'race-state', '1.2.3.4',
+      );
+
+      expect(result.sessionToken).toBeDefined();
+      expect(result.isNewUser).toBe(false);
+      expect(prisma.accountIdentity.findUnique).toHaveBeenCalledTimes(2);
+    });
+  });
 });

@@ -8,6 +8,7 @@ import { RbacModule } from './rbac/rbac.module.js';
 import { ApiKeysModule } from './api-keys/api-keys.module.js';
 import { ProjectsModule } from './projects/projects.module.js';
 import { ServicesModule } from './services/services.module.js';
+import { UsersModule } from './users/users.module.js';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { ServicesModule } from './services/services.module.js';
     ApiKeysModule,
     ProjectsModule,
     ServicesModule,
+    UsersModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

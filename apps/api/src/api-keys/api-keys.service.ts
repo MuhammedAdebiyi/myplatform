@@ -126,6 +126,87 @@ export class ApiKeysService {
     });
   }
 
+  async rotate(
+    organizationId: string,
+    keyId: string,
+    actorUserId?: string,
+    overrideExpiresIn?: string,
+  ) {
+    const oldKey = await prisma.apiKey.findFirst({
+      where: { id: keyId, organizationId },
+    });
+    if (!oldKey) {
+      throw new NotFoundException('API key not found');
+    }
+    if (oldKey.revokedAt) {
+      throw new ForbiddenException('Cannot rotate a revoked API key');
+    }
+    if (oldKey.rotatedAt) {
+      throw new ForbiddenException('API key has already been rotated');
+    }
+
+    const newKey = generateApiKey();
+
+    // Copy expiresAt policy unless overridden
+    let expiresAt = oldKey.expiresAt;
+    if (overrideExpiresIn) {
+      expiresAt = parseExpiresIn(overrideExpiresIn);
+    }
+
+    const newApiKey = await prisma.$transaction([
+      // Create the new key
+      prisma.apiKey.create({
+        data: {
+          organizationId,
+          createdById: oldKey.createdById,
+          name: oldKey.name,
+          keyPrefix: newKey.prefix,
+          keyHash: newKey.hash,
+          permissions: oldKey.permissions,
+          expiresAt,
+        },
+        select: {
+          id: true,
+          name: true,
+          keyPrefix: true,
+          permissions: true,
+          expiresAt: true,
+          createdAt: true,
+        },
+      }),
+      // Mark the old key as rotated with 24h grace period
+      prisma.apiKey.update({
+        where: { id: keyId },
+        data: {
+          rotatedAt: new Date(),
+          supersededById: null, // Will be set after we know the new key id
+        },
+      }),
+    ]);
+
+    // Now set the supersededById on the old key
+    await prisma.apiKey.update({
+      where: { id: keyId },
+      data: { supersededById: newApiKey[0].id },
+    });
+
+    this.audit.log({
+      organizationId,
+      actorType: ActorType.USER,
+      actorUserId,
+      action: 'api_key.rotated',
+      resourceType: 'ApiKey',
+      resourceId: keyId,
+      metadata: {
+        oldKeyPrefix: oldKey.keyPrefix,
+        newKeyId: newApiKey[0].id,
+        newKeyPrefix: newApiKey[0].keyPrefix,
+      },
+    });
+
+    return { ...newApiKey[0], key: newKey.raw };
+  }
+
   async validateKey(rawKey: string) {
     const { hashApiKey } = await import('@myplatform/auth');
     const hash = hashApiKey(rawKey);
@@ -138,12 +219,22 @@ export class ApiKeysService {
         permissions: true,
         expiresAt: true,
         revokedAt: true,
+        rotatedAt: true,
       },
     });
 
     if (!apiKey) return null;
     if (apiKey.revokedAt) return null;
     if (apiKey.expiresAt && apiKey.expiresAt < new Date()) return null;
+
+    // Rotated key: still valid during 24h grace period, then treated as revoked
+    if (apiKey.rotatedAt) {
+      const GRACE_PERIOD_MS = 24 * 60 * 60 * 1000; // 24 hours
+      const graceExpires = new Date(apiKey.rotatedAt.getTime() + GRACE_PERIOD_MS);
+      if (new Date() > graceExpires) {
+        return null;
+      }
+    }
 
     await prisma.apiKey.update({
       where: { id: apiKey.id },

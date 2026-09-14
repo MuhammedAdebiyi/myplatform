@@ -26,6 +26,16 @@ export class ApiKeysController {
     return this.apiKeys.create(organizationId, auth.actorUserId ?? '', dto);
   }
 
+  @Post(':id/rotate')
+  @RequirePermissions(Permission.API_KEY_CREATE)
+  rotate(
+    @GetOrganizationId() organizationId: string,
+    @Param('id') id: string,
+    @AuthContext() auth: AuthContextType,
+  ) {
+    return this.apiKeys.rotate(organizationId, id, auth.actorUserId);
+  }
+
   @Get()
   @RequirePermissions(Permission.API_KEY_LIST)
   list(@GetOrganizationId() organizationId: string) {

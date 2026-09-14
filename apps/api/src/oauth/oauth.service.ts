@@ -215,40 +215,82 @@ export class OAuthService {
     });
 
     if (existingIdentity) {
-      if (existingIdentity.user.status !== 'ACTIVE') {
-        throw new UnauthorizedException('Account is suspended');
-      }
-
-      const session = generateSessionToken();
-      await prisma.session.create({
-        data: {
-          userId: existingIdentity.user.id,
-          tokenHash: session.hash,
-          ipAddress: ip ?? null,
-          userAgent: userAgent ?? null,
-          expiresAt: sessionExpiresAt(),
-        },
-      });
-
-      await prisma.user.update({
-        where: { id: existingIdentity.user.id },
-        data: { lastLoginAt: new Date() },
-      });
-
-      this.audit.log({
-        actorType: ActorType.USER,
-        actorUserId: existingIdentity.user.id,
-        action: 'user.oauth.login',
-        resourceType: 'User',
-        resourceId: existingIdentity.user.id,
-        metadata: { provider },
-        ipAddress: ip,
-        userAgent,
-      });
-
-      return { sessionToken: session.raw, isNewUser: false };
+      return this.handleExistingUser(existingIdentity.user.id, existingIdentity.user.status, provider, ip, userAgent);
     }
 
+    try {
+      return await this.createNewUser(provider, userInfo, ip, userAgent);
+    } catch (err: any) {
+      // P2002 = unique constraint violation on @@unique([provider, providerAccountId])
+      // This fires when two concurrent callbacks race: both see null, both try to create.
+      // The second insert fails — recover by re-fetching the identity the first request created.
+      if (err?.code === 'P2002') {
+        this.logger.warn({ provider, providerAccountId: userInfo.id }, 'Race condition on identity create, re-fetching');
+        const retryIdentity = await prisma.accountIdentity.findUnique({
+          where: {
+            provider_providerAccountId: {
+              provider,
+              providerAccountId: userInfo.id,
+            },
+          },
+          include: { user: { select: { id: true, status: true } } },
+        });
+        if (retryIdentity) {
+          return this.handleExistingUser(retryIdentity.user.id, retryIdentity.user.status, provider, ip, userAgent);
+        }
+        // If still not found, something else went wrong — fall through to original error
+      }
+      throw err;
+    }
+  }
+
+  private async handleExistingUser(
+    userId: string,
+    status: string,
+    provider: AuthProvider,
+    ip?: string,
+    userAgent?: string,
+  ): Promise<{ sessionToken: string; isNewUser: boolean }> {
+    if (status !== 'ACTIVE') {
+      throw new UnauthorizedException('Account is suspended');
+    }
+
+    const session = generateSessionToken();
+    await prisma.session.create({
+      data: {
+        userId,
+        tokenHash: session.hash,
+        ipAddress: ip ?? null,
+        userAgent: userAgent ?? null,
+        expiresAt: sessionExpiresAt(),
+      },
+    });
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { lastLoginAt: new Date() },
+    });
+
+    this.audit.log({
+      actorType: ActorType.USER,
+      actorUserId: userId,
+      action: 'user.oauth.login',
+      resourceType: 'User',
+      resourceId: userId,
+      metadata: { provider },
+      ipAddress: ip,
+      userAgent,
+    });
+
+    return { sessionToken: session.raw, isNewUser: false };
+  }
+
+  private async createNewUser(
+    provider: AuthProvider,
+    userInfo: OAuthUserInfo,
+    ip?: string,
+    userAgent?: string,
+  ): Promise<{ sessionToken: string; isNewUser: boolean }> {
     const result = await prisma.$transaction(async (tx) => {
       const slug = `org-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
