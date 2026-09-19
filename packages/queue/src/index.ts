@@ -1,4 +1,4 @@
-import { Queue, Worker, QueueOptions, WorkerOptions } from 'bullmq';
+import { Queue, Worker, Job, QueueOptions, WorkerOptions } from 'bullmq';
 import IORedis from 'ioredis';
 
 let connection: IORedis | null = null;
@@ -18,7 +18,7 @@ export function createQueue<T = unknown>(name: string, opts?: Partial<QueueOptio
 
 export function createWorker<T = unknown>(
   name: string,
-  processor: (job: { data: T }) => Promise<void>,
+  processor: (job: Job<T>) => Promise<void>,
   opts?: Partial<WorkerOptions>
 ) {
   return new Worker<T>(name, processor, { connection: getRedisConnection(), ...opts });

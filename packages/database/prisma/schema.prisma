@@ -112,10 +112,11 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships Membership[]
-  projects    Project[]
-  apiKeys     ApiKey[]
-  auditLogs   AuditLog[]
+  memberships          Membership[]
+  projects             Project[]
+  apiKeys              ApiKey[]
+  auditLogs            AuditLog[]
+  githubInstallations  GitHubInstallation[]
 }
 
 model Membership {
@@ -224,6 +225,58 @@ model LinkAccount {
   @@index([targetId])
 }
 
+// ───────────────────────── github app ─────────────────────────
+
+model GitHubInstallation {
+  id             String       @id @default(cuid())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+  installationId Int          @unique
+  accountLogin   String
+  accountType    String       // "User" or "Organization"
+  suspendedAt    DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  repositories GitHubRepository[]
+
+  @@index([organizationId])
+}
+
+model GitHubRepository {
+  id                String            @id @default(cuid())
+  installation      GitHubInstallation @relation(fields: [installationId], references: [id])
+  installationId    String
+  githubRepoId      BigInt            @unique
+  name              String
+  fullName          String
+  private           Boolean
+  defaultBranch     String
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  services Service[]
+
+  @@index([installationId])
+}
+
+model WebhookDelivery {
+  id          String   @id @default(cuid())
+  deliveryId  String   @unique
+  event       String
+  processedAt DateTime @default(now())
+}
+
+model InstallationState {
+  id             String   @id @default(cuid())
+  state          String   @unique
+  organizationId String
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+
+  @@index([expiresAt])
+}
+
 // ───────────────────────── resources (now tenant-scoped) ─────────────────────────
 
 model Project {
@@ -255,6 +308,8 @@ model Service {
 
   repoUrl        String?
   branch         String?
+  githubRepositoryId String?
+  githubRepository   GitHubRepository? @relation(fields: [githubRepositoryId], references: [id])
   dockerfilePath String?
   buildCommand   String?
   startCommand   String?

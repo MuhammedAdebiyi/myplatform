@@ -9,6 +9,7 @@ import { ApiKeysModule } from './api-keys/api-keys.module.js';
 import { ProjectsModule } from './projects/projects.module.js';
 import { ServicesModule } from './services/services.module.js';
 import { UsersModule } from './users/users.module.js';
+import { GitHubModule } from './github/github.module.js';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { UsersModule } from './users/users.module.js';
     ProjectsModule,
     ServicesModule,
     UsersModule,
+    GitHubModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

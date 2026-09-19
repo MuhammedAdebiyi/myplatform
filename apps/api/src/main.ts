@@ -7,7 +7,7 @@ import { loadEnv } from '@myplatform/config';
 
 async function bootstrap() {
   const env = loadEnv();
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.enableCors();
   const port = process.env.PORT ? Number(process.env.PORT) : 4000;

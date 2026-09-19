@@ -20,6 +20,7 @@
     "@myplatform/auth": "workspace:^",
     "@myplatform/config": "workspace:^",
     "@myplatform/database": "workspace:^",
+    "@myplatform/github": "workspace:^",
     "@myplatform/queue": "workspace:^",
     "@myplatform/shared": "workspace:^",
     "@nestjs/common": "10",
