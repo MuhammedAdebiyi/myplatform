@@ -154,6 +154,41 @@ export async function listInstallationRepos(
   return response.json() as Promise<GitHubInstallationReposResponse>;
 }
 
+// ─── Repo archive download ──────────────────────────────
+
+/**
+ * Download a tarball of a repository at a specific ref.
+ * Uses installation access token for auth.
+ * Returns the raw Buffer of the tar.gz archive.
+ */
+export async function getRepoArchive(
+  installationToken: string,
+  fullName: string,
+  ref: string,
+): Promise<Buffer> {
+  const response = await fetch(
+    `https://api.github.com/repos/${fullName}/tarball/${ref}`,
+    {
+      headers: {
+        Authorization: `Bearer ${installationToken}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+      redirect: 'follow',
+    },
+  );
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(
+      `GitHub download archive failed (${response.status}): ${body}`,
+    );
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
 // ─── Webhook signature verification ────────────────────────
 
 /**

@@ -6,15 +6,21 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch src/index.ts",
+    "test": "jest"
   },
   "dependencies": {
     "@myplatform/database": "workspace:^",
+    "@myplatform/github": "workspace:^",
     "@myplatform/queue": "workspace:^",
-    "dotenv": "^17.4.2"
+    "dotenv": "^17.4.2",
+    "tar": "^7.5.22"
   },
   "devDependencies": {
     "@types/node": "22",
+    "@types/tar": "^6.1.11",
+    "jest": "^30.5.1",
+    "ts-jest": "^29.4.12",
     "typescript": "~5.6.3"
   }
 }

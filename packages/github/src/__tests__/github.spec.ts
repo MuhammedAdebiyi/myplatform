@@ -3,6 +3,7 @@ import {
   generateAppJwt,
   verifyWebhookSignature,
   generateInstallationState,
+  getRepoArchive,
   type GitHubAppConfig,
 } from '../index.js';
 
@@ -105,5 +106,44 @@ describe('generateInstallationState', () => {
   it('produces unique values on successive calls', () => {
     const states = new Set(Array.from({ length: 100 }, () => generateInstallationState()));
     expect(states.size).toBe(100);
+  });
+});
+
+describe('getRepoArchive', () => {
+  let fetchSpy: jest.SpyInstance;
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+  });
+
+  it('downloads tarball and returns a Buffer', async () => {
+    const fakeData = Buffer.from('fake-tar-data');
+    fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      arrayBuffer: async () => fakeData.buffer.slice(fakeData.byteOffset, fakeData.byteOffset + fakeData.byteLength),
+    } as any);
+
+    const result = await getRepoArchive('token-123', 'org/repo', 'main');
+    expect(Buffer.isBuffer(result)).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://api.github.com/repos/org/repo/tarball/main',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer token-123',
+        }),
+      }),
+    );
+  });
+
+  it('throws on non-OK response', async () => {
+    fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: false,
+      status: 404,
+      text: async () => 'Not Found',
+    } as any);
+
+    await expect(
+      getRepoArchive('token-123', 'org/nonexistent', 'main'),
+    ).rejects.toThrow('GitHub download archive failed (404)');
   });
 });
