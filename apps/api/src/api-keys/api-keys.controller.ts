@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiKeysService } from './api-keys.service.js';
 import { ApiKeysThrottlerGuard } from './api-keys-throttler.guard.js';
 import { CreateApiKeyDto } from './dto/create-api-key.dto.js';
@@ -10,6 +10,7 @@ import { GetOrganizationId } from '../rbac/decorators/get-organization-id.decora
 import { AuthContext } from '../auth/decorators/auth-context.decorator.js';
 import type { AuthContext as AuthContextType } from '../auth/decorators/auth-context.decorator.js';
 import { Permission } from '../rbac/permissions.js';
+import type { CursorPaginationQuery } from '../common/pagination.js';
 
 @UseGuards(SessionGuard, ApiKeyGuard, OrganizationGuard, ApiKeysThrottlerGuard)
 @Controller('organizations/:organizationId/api-keys')
@@ -38,8 +39,11 @@ export class ApiKeysController {
 
   @Get()
   @RequirePermissions(Permission.API_KEY_LIST)
-  list(@GetOrganizationId() organizationId: string) {
-    return this.apiKeys.list(organizationId);
+  list(
+    @GetOrganizationId() organizationId: string,
+    @Query() query: CursorPaginationQuery,
+  ) {
+    return this.apiKeys.list(organizationId, query.limit, query.cursor);
   }
 
   @Delete(':id')

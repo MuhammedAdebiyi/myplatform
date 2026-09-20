@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
 import { prisma, AuthProvider, ActorType, OrgRole } from '@myplatform/database';
 import { generatePkcePair, generateOAuthState, hashSessionToken, sessionExpiresAt, generateSessionToken } from '@myplatform/auth';
 import { AuditService } from '../audit/audit.service.js';
+import { paginateQuery, parseLimit } from '../common/pagination.js';
 
 interface OAuthProviderConfig {
   clientId: string;
@@ -517,16 +518,21 @@ export class OAuthService {
     });
   }
 
-  async listIdentities(userId: string) {
-    return prisma.accountIdentity.findMany({
-      where: { userId },
-      select: {
-        id: true,
-        provider: true,
-        email: true,
-        createdAt: true,
-      },
-      orderBy: { createdAt: 'asc' },
-    });
+  async listIdentities(userId: string, limit?: number, cursor?: string) {
+    return paginateQuery(
+      (args) => prisma.accountIdentity.findMany({
+        ...args,
+        select: {
+          id: true,
+          provider: true,
+          email: true,
+          createdAt: true,
+        },
+      }),
+      { userId },
+      parseLimit(limit),
+      cursor,
+      { id: 'asc' },
+    );
   }
 }

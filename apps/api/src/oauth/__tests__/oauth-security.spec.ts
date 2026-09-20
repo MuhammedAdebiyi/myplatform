@@ -360,11 +360,12 @@ describe('OAuth Security (RULE 33 adversarial tests)', () => {
 
     beforeEach(() => {
       // Mock fetch to simulate token exchange and user info
-      fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(async (url: string) => {
-        if (typeof url === 'string' && url.includes('googleapis.com/token')) {
+      fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(async (url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
+        if (urlStr.includes('googleapis.com/token')) {
           return { ok: true, json: async () => ({ access_token: 'mock-token', token_type: 'Bearer', scope: '' }) } as any;
         }
-        if (typeof url === 'string' && url.includes('googleapis.com/oauth2')) {
+        if (urlStr.includes('googleapis.com/oauth2')) {
           return { ok: true, json: async () => ({ sub: 'google-user-123', email: 'test@gmail.com', name: 'Test User' }) } as any;
         }
         return { ok: false, text: async () => 'not found' } as any;

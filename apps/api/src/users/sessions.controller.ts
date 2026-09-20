@@ -13,6 +13,7 @@ import { SessionsService } from './sessions.service.js';
 import { SessionGuard } from '../auth/guards/session.guard.js';
 import { CurrentUser, CurrentSessionId } from '../auth/decorators/current-user.decorator.js';
 import type { CurrentUser as CurrentUserType } from '../auth/decorators/current-user.decorator.js';
+import type { CursorPaginationQuery } from '../common/pagination.js';
 
 @UseGuards(SessionGuard)
 @Controller('users/me/sessions')
@@ -20,8 +21,12 @@ export class SessionsController {
   constructor(private readonly sessions: SessionsService) {}
 
   @Get()
-  list(@CurrentUser() user: CurrentUserType, @CurrentSessionId() sessionId: string) {
-    return this.sessions.list(user.id, sessionId);
+  list(
+    @CurrentUser() user: CurrentUserType,
+    @CurrentSessionId() sessionId: string,
+    @Query() query: CursorPaginationQuery,
+  ) {
+    return this.sessions.list(user.id, sessionId, query.limit, query.cursor);
   }
 
   @Delete(':id')

@@ -5,6 +5,7 @@ import { SessionGuard } from '../auth/guards/session.guard.js';
 import { OAuthThrottlerGuard } from './oauth-throttler.guard.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import type { CurrentUser as CurrentUserType } from '../auth/decorators/current-user.decorator.js';
+import type { CursorPaginationQuery } from '../common/pagination.js';
 
 @Controller('auth')
 export class OAuthController {
@@ -128,7 +129,10 @@ export class OAuthController {
 
   @UseGuards(SessionGuard)
   @Get('identities')
-  async listIdentities(@CurrentUser() user: CurrentUserType) {
-    return this.oauthService.listIdentities(user.id);
+  async listIdentities(
+    @CurrentUser() user: CurrentUserType,
+    @Query() query: CursorPaginationQuery,
+  ) {
+    return this.oauthService.listIdentities(user.id, query.limit, query.cursor);
   }
 }

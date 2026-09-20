@@ -63,16 +63,18 @@ describe('SessionsService', () => {
 
       const result = await service.list('user-1', 'sess-1');
 
-      expect(result).toEqual([
+      expect(result.items).toEqual([
         { ...sessions[0], isCurrent: true },
         { ...sessions[1], isCurrent: false },
       ]);
+      expect(result.nextCursor).toBeNull();
     });
 
     it('returns empty array when no active sessions', async () => {
       mockPrismaSession.findMany.mockResolvedValue([]);
       const result = await service.list('user-1', 'sess-1');
-      expect(result).toEqual([]);
+      expect(result.items).toEqual([]);
+      expect(result.nextCursor).toBeNull();
     });
   });
 

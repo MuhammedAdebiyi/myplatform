@@ -7,6 +7,7 @@ import { prisma, ActorType } from '@myplatform/database';
 import { generateApiKey } from '@myplatform/auth';
 import { Permission } from '../rbac/permissions.js';
 import { AuditService } from '../audit/audit.service.js';
+import { paginateQuery, parseLimit } from '../common/pagination.js';
 
 const MAX_PERMISSIONS_PER_KEY: Permission[] = [
   Permission.PROJECT_READ,
@@ -80,23 +81,25 @@ export class ApiKeysService {
     return { ...apiKey, key: key.raw };
   }
 
-  async list(organizationId: string) {
-    return prisma.apiKey.findMany({
-      where: {
-        organizationId,
-        revokedAt: null,
-      },
-      select: {
-        id: true,
-        name: true,
-        keyPrefix: true,
-        permissions: true,
-        expiresAt: true,
-        lastUsedAt: true,
-        createdAt: true,
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+  async list(organizationId: string, limit?: number, cursor?: string) {
+    return paginateQuery(
+      (args) => prisma.apiKey.findMany({
+        ...args,
+        select: {
+          id: true,
+          name: true,
+          keyPrefix: true,
+          permissions: true,
+          expiresAt: true,
+          lastUsedAt: true,
+          createdAt: true,
+        },
+      }),
+      { organizationId, revokedAt: null },
+      parseLimit(limit),
+      cursor,
+      { id: 'desc' },
+    );
   }
 
   async revoke(organizationId: string, keyId: string, actorUserId?: string) {

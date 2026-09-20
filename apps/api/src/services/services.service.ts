@@ -2,15 +2,25 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { prisma, Service, ActorType } from '@myplatform/database';
 import { CreateServiceDto } from './dto/create-service.dto.js';
 import { AuditService } from '../audit/audit.service.js';
+import { paginateQuery, parseLimit, type CursorPaginationResult } from '../common/pagination.js';
 
 @Injectable()
 export class ServicesService {
   constructor(private readonly audit: AuditService) {}
 
-  findAllForProject(organizationId: string, projectId: string): Promise<Service[]> {
-    return prisma.service.findMany({
-      where: { projectId, organizationId },
-    });
+  findAllForProject(
+    organizationId: string,
+    projectId: string,
+    limit?: number,
+    cursor?: string,
+  ): Promise<CursorPaginationResult<Service>> {
+    return paginateQuery(
+      (args) => prisma.service.findMany(args),
+      { projectId, organizationId },
+      parseLimit(limit),
+      cursor,
+      { id: 'asc' },
+    );
   }
 
   async findOne(organizationId: string, id: string): Promise<Service> {

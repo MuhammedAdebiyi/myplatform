@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ServicesService } from './services.service.js';
 import { CreateServiceDto } from './dto/create-service.dto.js';
 import { SessionGuard } from '../auth/guards/session.guard.js';
@@ -9,6 +9,7 @@ import { GetOrganizationId } from '../rbac/decorators/get-organization-id.decora
 import { AuthContext } from '../auth/decorators/auth-context.decorator.js';
 import type { AuthContext as AuthContextType } from '../auth/decorators/auth-context.decorator.js';
 import { Permission } from '../rbac/permissions.js';
+import type { CursorPaginationQuery } from '../common/pagination.js';
 
 @UseGuards(SessionGuard, ApiKeyGuard, OrganizationGuard)
 @Controller('organizations/:organizationId/projects/:projectId/services')
@@ -20,8 +21,9 @@ export class ServicesController {
   findAll(
     @GetOrganizationId() organizationId: string,
     @Param('projectId') projectId: string,
+    @Query() query: CursorPaginationQuery,
   ) {
-    return this.services.findAllForProject(organizationId, projectId);
+    return this.services.findAllForProject(organizationId, projectId, query.limit, query.cursor);
   }
 
   @Get(':id')
