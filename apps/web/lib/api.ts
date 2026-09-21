@@ -28,3 +28,15 @@ export async function apiFetch(
   if (res.status === 204) return null;
   return res.json();
 }
+
+export async function apiFetchServer(path: string, token: string) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!res.ok) return null;
+  return res.json();
+}
