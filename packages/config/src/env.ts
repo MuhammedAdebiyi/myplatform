@@ -8,6 +8,9 @@ const envSchema = z.object({
   GITHUB_APP_ID: z.string().optional(),
   GITHUB_APP_PRIVATE_KEY: z.string().optional(),
   GITHUB_WEBHOOK_SECRET: z.string().optional(),
+  // AES-256 key material for secret env vars (base64 32 bytes). Optional so
+  // non-secret-only deployments boot; createEnvVar fails closed if missing.
+  ENV_VAR_ENCRYPTION_KEY: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

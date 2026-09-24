@@ -8,6 +8,13 @@ import { CreateServiceDto } from './dto/create-service.dto.js';
 import { CreateEnvVarDto } from './dto/create-env-var.dto.js';
 import { AuditService } from '../audit/audit.service.js';
 import { paginateQuery, parseLimit, type CursorPaginationResult } from '../common/pagination.js';
+import {
+  encryptSecret,
+  isEncryptedValue,
+  toPublicEnvVar,
+  toPublicEnvVars,
+  type PublicEnvVar,
+} from '../common/env-secret.js';
 
 @Injectable()
 export class ServicesService {
@@ -28,16 +35,30 @@ export class ServicesService {
     return service;
   }
 
+  /** Encrypt any legacy plaintext secret rows found while reading (at-rest fix). */
+  private async encryptLegacySecrets(rows: EnvVar[]): Promise<void> {
+    for (const row of rows) {
+      if (row.isSecret && !isEncryptedValue(row.value)) {
+        await prisma.envVar.update({
+          where: { id: row.id },
+          data: { value: encryptSecret(row.value) },
+        });
+      }
+    }
+  }
+
   async listEnvVars(
     organizationId: string,
     projectId: string,
     serviceId: string,
-  ): Promise<EnvVar[]> {
+  ): Promise<PublicEnvVar[]> {
     await this.requireService(organizationId, projectId, serviceId);
-    return prisma.envVar.findMany({
+    const rows = await prisma.envVar.findMany({
       where: { serviceId },
       orderBy: { key: 'asc' },
     });
+    await this.encryptLegacySecrets(rows);
+    return toPublicEnvVars(rows);
   }
 
   async createEnvVar(
@@ -47,8 +68,8 @@ export class ServicesService {
     dto: CreateEnvVarDto,
     actorUserId?: string,
     actorApiKeyId?: string,
-  ): Promise<EnvVar> {
-    const service = await this.requireService(organizationId, projectId, serviceId);
+  ): Promise<PublicEnvVar> {
+    await this.requireService(organizationId, projectId, serviceId);
 
     const existing = await prisma.envVar.findUnique({
       where: { serviceId_key: { serviceId, key: dto.key } },
@@ -58,12 +79,15 @@ export class ServicesService {
       throw new ConflictException(`Env var ${dto.key} already exists`);
     }
 
+    const isSecret = dto.isSecret ?? false;
+    const storedValue = isSecret ? encryptSecret(dto.value) : dto.value;
+
     const envVar = await prisma.envVar.create({
       data: {
         serviceId,
         key: dto.key,
-        value: dto.value,
-        isSecret: dto.isSecret ?? false,
+        value: storedValue,
+        isSecret,
       },
     });
 
@@ -75,10 +99,11 @@ export class ServicesService {
       action: 'service.env_var.create',
       resourceType: 'EnvVar',
       resourceId: envVar.id,
-      metadata: { serviceId, key: envVar.key, isSecret: envVar.isSecret },
+      metadata: { serviceId, key: envVar.key, isSecret },
     });
 
-    return envVar;
+    // Create-once plaintext (same pattern as API keys / OAuth secrets).
+    return { ...envVar, value: dto.value };
   }
 
   async removeEnvVar(
@@ -88,7 +113,7 @@ export class ServicesService {
     envVarId: string,
     actorUserId?: string,
     actorApiKeyId?: string,
-  ): Promise<EnvVar> {
+  ): Promise<PublicEnvVar> {
     await this.requireService(organizationId, projectId, serviceId);
 
     const envVar = await prisma.envVar.findFirst({
@@ -111,7 +136,7 @@ export class ServicesService {
       metadata: { serviceId, key: envVar.key },
     });
 
-    return envVar;
+    return toPublicEnvVar(envVar);
   }
 
   findAllForProject(
@@ -129,13 +154,17 @@ export class ServicesService {
     );
   }
 
-  async findOne(organizationId: string, id: string): Promise<Service> {
+  async findOne(
+    organizationId: string,
+    id: string,
+  ): Promise<Service & { envVars: PublicEnvVar[] }> {
     const service = await prisma.service.findFirst({
       where: { id, organizationId },
       include: { envVars: true, domains: true, healthCheck: true, deployments: true },
     });
     if (!service) throw new NotFoundException(`Service ${id} not found`);
-    return service;
+    await this.encryptLegacySecrets(service.envVars);
+    return { ...service, envVars: toPublicEnvVars(service.envVars) };
   }
 
   async create(
