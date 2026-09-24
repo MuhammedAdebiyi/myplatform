@@ -148,7 +148,7 @@ export default function LandingPage() {
               Sign in
             </Link>
             <Link
-              href="/projects"
+              href="/register"
               className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-text)] transition-opacity hover:opacity-90"
             >
               Get started
@@ -215,7 +215,7 @@ export default function LandingPage() {
             transition={{ delay: 0.9 }}
           >
             <Link
-              href="/projects"
+              href="/register"
               className="rounded-lg bg-[var(--accent)] px-6 py-3 text-sm font-semibold text-[var(--accent-text)] transition-opacity hover:opacity-90"
             >
               Connect a repository
@@ -424,7 +424,7 @@ export default function LandingPage() {
             </p>
             <div className="mt-10">
               <Link
-                href="/projects"
+                href="/register"
                 className="inline-block rounded-lg bg-[var(--accent)] px-8 py-3 text-sm font-semibold text-[var(--accent-text)] transition-opacity hover:opacity-90"
               >
                 Get started

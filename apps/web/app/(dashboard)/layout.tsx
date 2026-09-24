@@ -16,16 +16,12 @@ export default async function DashboardLayout({
     redirect("/login");
   }
 
-  let authenticated = false;
-
   try {
-    const me = await apiFetchServer("/auth/me", token);
-    authenticated = !!me?.authenticated;
+    const me = await apiFetchServer("/users/me", token);
+    if (!me?.id) {
+      redirect("/login");
+    }
   } catch {
-    authenticated = false;
-  }
-
-  if (!authenticated) {
     redirect("/login");
   }
 

@@ -10,11 +10,16 @@ export async function GET() {
   }
 
   try {
-    const data = await apiFetchServer("/users/me/sessions", token);
-    if (data) {
-      return NextResponse.json({ authenticated: true });
+    const me = await apiFetchServer("/users/me", token);
+    if (!me) {
+      return NextResponse.json({ authenticated: false }, { status: 401 });
     }
-    return NextResponse.json({ authenticated: false }, { status: 401 });
+
+    return NextResponse.json({
+      authenticated: true,
+      user: { id: me.id, name: me.name, email: me.email },
+      organizations: me.organizations,
+    });
   } catch {
     return NextResponse.json({ authenticated: false }, { status: 401 });
   }

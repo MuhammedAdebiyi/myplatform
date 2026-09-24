@@ -31,6 +31,12 @@ type AuthContextType = {
   logout: () => Promise<void>;
 };
 
+type AuthMeResponse = {
+  authenticated: boolean;
+  user?: User | null;
+  organizations?: Org[];
+};
+
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function useAuth() {
@@ -58,8 +64,19 @@ export default function AuthProvider({
         setUser(null);
         return;
       }
-      const data = await res.json();
-      setUser(data.user);
+      const data: AuthMeResponse = await res.json();
+      setUser(data.user ?? null);
+      if (data.organizations && data.organizations.length > 0) {
+        setOrganizations(data.organizations);
+        setActiveOrgState((prev) => {
+          if (prev) return prev;
+          const savedSlug = localStorage.getItem("activeOrgSlug");
+          const saved = data.organizations!.find((o) => o.slug === savedSlug);
+          const next = saved ?? data.organizations![0];
+          localStorage.setItem("activeOrgSlug", next.slug);
+          return next;
+        });
+      }
     } catch {
       setUser(null);
     }
