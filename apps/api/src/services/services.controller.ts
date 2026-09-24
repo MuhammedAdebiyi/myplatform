@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ServicesService } from './services.service.js';
 import { CreateServiceDto } from './dto/create-service.dto.js';
+import { CreateEnvVarDto } from './dto/create-env-var.dto.js';
 import { SessionGuard } from '../auth/guards/session.guard.js';
 import { ApiKeyGuard } from '../auth/guards/api-key.guard.js';
 import { OrganizationGuard } from '../rbac/guards/organization.guard.js';
@@ -33,6 +34,54 @@ export class ServicesController {
     @Param('id') id: string,
   ) {
     return this.services.findOne(organizationId, id);
+  }
+
+  @Get(':id/env-vars')
+  @RequirePermissions(Permission.SERVICE_READ)
+  listEnvVars(
+    @GetOrganizationId() organizationId: string,
+    @Param('projectId') projectId: string,
+    @Param('id') id: string,
+  ) {
+    return this.services.listEnvVars(organizationId, projectId, id);
+  }
+
+  @Post(':id/env-vars')
+  @RequirePermissions(Permission.SERVICE_UPDATE)
+  createEnvVar(
+    @GetOrganizationId() organizationId: string,
+    @Param('projectId') projectId: string,
+    @Param('id') id: string,
+    @Body() dto: CreateEnvVarDto,
+    @AuthContext() auth: AuthContextType,
+  ) {
+    return this.services.createEnvVar(
+      organizationId,
+      projectId,
+      id,
+      dto,
+      auth.actorUserId,
+      auth.actorApiKeyId,
+    );
+  }
+
+  @Delete(':id/env-vars/:envVarId')
+  @RequirePermissions(Permission.SERVICE_UPDATE)
+  removeEnvVar(
+    @GetOrganizationId() organizationId: string,
+    @Param('projectId') projectId: string,
+    @Param('id') id: string,
+    @Param('envVarId') envVarId: string,
+    @AuthContext() auth: AuthContextType,
+  ) {
+    return this.services.removeEnvVar(
+      organizationId,
+      projectId,
+      id,
+      envVarId,
+      auth.actorUserId,
+      auth.actorApiKeyId,
+    );
   }
 
   @Post()
