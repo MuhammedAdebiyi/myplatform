@@ -53,6 +53,21 @@ describe('OAuth Security (RULE 33 adversarial tests)', () => {
   let oauthService: OAuthService;
   let mockAudit: { log: jest.Mock };
 
+  const prevEnv = { ...process.env };
+
+  beforeAll(() => {
+    process.env.GOOGLE_CLIENT_ID = 'test-google-client';
+    process.env.GOOGLE_CLIENT_SECRET = 'test-google-secret';
+    process.env.GITHUB_CLIENT_ID = 'test-github-client';
+    process.env.GITHUB_CLIENT_SECRET = 'test-github-secret';
+    process.env.API_URL = 'http://localhost:4000';
+    process.env.APP_URL = 'http://localhost:3000';
+  });
+
+  afterAll(() => {
+    process.env = prevEnv;
+  });
+
   beforeEach(() => {
     mockAudit = { log: jest.fn() };
     oauthService = new OAuthService(mockAudit as any);

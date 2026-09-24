@@ -484,12 +484,18 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const from = searchParams.get("from") || "/projects";
   const oauthError = searchParams.get("error");
+  const oauthErrorMessage =
+    oauthError === "oauth_not_configured"
+      ? "Social sign-in is not configured on this server. Try email instead."
+      : oauthError
+        ? "OAuth sign-in failed. Try again."
+        : "";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
   const [touched, setTouched] = useState<{ email?: boolean; password?: boolean }>({});
-  const [apiError, setApiError] = useState(oauthError ? "OAuth sign-in failed. Try again." : "");
+  const [apiError, setApiError] = useState(oauthErrorMessage);
   const [loading, setLoading] = useState(false);
 
   const showError = (field: "email" | "password") => {

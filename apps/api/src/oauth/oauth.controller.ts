@@ -1,4 +1,14 @@
-import { Controller, Get, Post, Delete, Query, Param, Req, Res, UnauthorizedException, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Delete,
+  Query,
+  Param,
+  Req,
+  Res,
+  UnauthorizedException,
+  UseGuards,
+} from '@nestjs/common';
 import { OAuthService } from './oauth.service.js';
 import { AuthProvider } from '@myplatform/database';
 import { SessionGuard } from '../auth/guards/session.guard.js';
@@ -11,14 +21,41 @@ import type { CursorPaginationQuery } from '../common/pagination.js';
 export class OAuthController {
   constructor(private readonly oauthService: OAuthService) {}
 
+  private appUrl(): string {
+    return (process.env.APP_URL || 'http://localhost:3000').replace(/\/$/, '');
+  }
+
+  /** After the API finishes the code exchange, hand the browser to the web app to set mp_session. */
+  private completeOnFrontend(
+    res: any,
+    sessionToken: string,
+    isNewUser: boolean,
+    redirectTo: string | null,
+  ) {
+    const params = new URLSearchParams({
+      token: sessionToken,
+      new: String(isNewUser),
+    });
+    if (redirectTo) params.set('redirect_to', redirectTo);
+    res.redirect(`${this.appUrl()}/api/auth/oauth?${params.toString()}`);
+  }
+
+  private failOnFrontend(res: any, code = 'oauth_failed') {
+    res.redirect(`${this.appUrl()}/login?error=${code}`);
+  }
+
   @UseGuards(OAuthThrottlerGuard)
   @Get('google')
   async googleInit(@Req() req: any, @Res() res: any) {
-    const { url } = await this.oauthService.createAuthorizationUrl(
-      AuthProvider.GOOGLE,
-      req.query.redirect_to as string | undefined,
-    );
-    res.redirect(url);
+    try {
+      const { url } = await this.oauthService.createAuthorizationUrl(
+        AuthProvider.GOOGLE,
+        req.query.redirect_to as string | undefined,
+      );
+      res.redirect(url);
+    } catch {
+      this.failOnFrontend(res, 'oauth_not_configured');
+    }
   }
 
   @UseGuards(OAuthThrottlerGuard)
@@ -30,30 +67,36 @@ export class OAuthController {
     @Res() res: any,
   ) {
     if (!code || !state) {
-      throw new UnauthorizedException('Missing code or state');
+      this.failOnFrontend(res);
+      return;
     }
 
-    const result = await this.oauthService.handleCallback(
-      AuthProvider.GOOGLE,
-      code,
-      state,
-      req.ip,
-      req.headers['user-agent'],
-    );
-
-    res.redirect(
-      `${process.env.APP_URL}/auth/callback?token=${result.sessionToken}&new=${result.isNewUser}`,
-    );
+    try {
+      const result = await this.oauthService.handleCallback(
+        AuthProvider.GOOGLE,
+        code,
+        state,
+        req.ip,
+        req.headers['user-agent'],
+      );
+      this.completeOnFrontend(res, result.sessionToken, result.isNewUser, result.redirectTo);
+    } catch {
+      this.failOnFrontend(res);
+    }
   }
 
   @UseGuards(OAuthThrottlerGuard)
   @Get('github')
   async githubInit(@Req() req: any, @Res() res: any) {
-    const { url } = await this.oauthService.createAuthorizationUrl(
-      AuthProvider.GITHUB,
-      req.query.redirect_to as string | undefined,
-    );
-    res.redirect(url);
+    try {
+      const { url } = await this.oauthService.createAuthorizationUrl(
+        AuthProvider.GITHUB,
+        req.query.redirect_to as string | undefined,
+      );
+      res.redirect(url);
+    } catch {
+      this.failOnFrontend(res, 'oauth_not_configured');
+    }
   }
 
   @UseGuards(OAuthThrottlerGuard)
@@ -65,20 +108,22 @@ export class OAuthController {
     @Res() res: any,
   ) {
     if (!code || !state) {
-      throw new UnauthorizedException('Missing code or state');
+      this.failOnFrontend(res);
+      return;
     }
 
-    const result = await this.oauthService.handleCallback(
-      AuthProvider.GITHUB,
-      code,
-      state,
-      req.ip,
-      req.headers['user-agent'],
-    );
-
-    res.redirect(
-      `${process.env.APP_URL}/auth/callback?token=${result.sessionToken}&new=${result.isNewUser}`,
-    );
+    try {
+      const result = await this.oauthService.handleCallback(
+        AuthProvider.GITHUB,
+        code,
+        state,
+        req.ip,
+        req.headers['user-agent'],
+      );
+      this.completeOnFrontend(res, result.sessionToken, result.isNewUser, result.redirectTo);
+    } catch {
+      this.failOnFrontend(res);
+    }
   }
 
   @UseGuards(SessionGuard)
@@ -113,7 +158,7 @@ export class OAuthController {
     const authProvider = provider.toUpperCase() as AuthProvider;
     await this.oauthService.handleLinkCallback(authProvider, code, state, user.id);
 
-    res.redirect(`${process.env.APP_URL}/settings/accounts?linked=true`);
+    res.redirect(`${this.appUrl()}/settings/accounts?linked=true`);
   }
 
   @UseGuards(SessionGuard)

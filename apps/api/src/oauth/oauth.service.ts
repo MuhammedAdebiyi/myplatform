@@ -33,27 +33,53 @@ export class OAuthService {
 
   private getProviderConfig(provider: AuthProvider): OAuthProviderConfig {
     switch (provider) {
-      case AuthProvider.GOOGLE:
+      case AuthProvider.GOOGLE: {
+        const clientId = process.env.GOOGLE_CLIENT_ID;
+        const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+        if (!clientId || !clientSecret) {
+          throw new UnauthorizedException(
+            'Google OAuth is not configured (missing GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET)',
+          );
+        }
         return {
-          clientId: process.env.GOOGLE_CLIENT_ID!,
-          clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+          clientId,
+          clientSecret,
           authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
           tokenUrl: 'https://oauth2.googleapis.com/token',
           userinfoUrl: 'https://www.googleapis.com/oauth2/v2/userinfo',
           scope: 'openid email profile',
         };
-      case AuthProvider.GITHUB:
+      }
+      case AuthProvider.GITHUB: {
+        const clientId = process.env.GITHUB_CLIENT_ID;
+        const clientSecret = process.env.GITHUB_CLIENT_SECRET;
+        if (!clientId || !clientSecret) {
+          throw new UnauthorizedException(
+            'GitHub OAuth is not configured (missing GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET)',
+          );
+        }
         return {
-          clientId: process.env.GITHUB_CLIENT_ID!,
-          clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+          clientId,
+          clientSecret,
           authorizationUrl: 'https://github.com/login/oauth/authorize',
           tokenUrl: 'https://github.com/login/oauth/access_token',
           userinfoUrl: 'https://api.github.com/user',
           scope: 'read:user user:email',
         };
+      }
       default:
         throw new Error(`Unknown provider: ${provider}`);
     }
+  }
+
+  /** OAuth providers must redirect back to the API, not the web app. */
+  private getCallbackUrl(provider: AuthProvider): string {
+    const apiBase = (
+      process.env.API_URL ||
+      process.env.OAUTH_API_URL ||
+      'http://localhost:4000'
+    ).replace(/\/$/, '');
+    return `${apiBase}/auth/${provider.toLowerCase()}/callback`;
   }
 
   async createAuthorizationUrl(
@@ -79,7 +105,7 @@ export class OAuthService {
 
     const params = new URLSearchParams({
       client_id: config.clientId,
-      redirect_uri: `${process.env.APP_URL}/auth/${provider.toLowerCase()}/callback`,
+      redirect_uri: this.getCallbackUrl(provider),
       response_type: 'code',
       scope: config.scope,
       state,
@@ -99,7 +125,7 @@ export class OAuthService {
     state: string,
     ip?: string,
     userAgent?: string,
-  ): Promise<{ sessionToken: string; isNewUser: boolean }> {
+  ): Promise<{ sessionToken: string; isNewUser: boolean; redirectTo: string | null }> {
     const oauthState = await prisma.oAuthState.findUnique({
       where: { state },
     });
@@ -117,10 +143,11 @@ export class OAuthService {
       throw new UnauthorizedException('OAuth state expired');
     }
 
+    const redirectTo = oauthState.redirectTo;
     await prisma.oAuthState.delete({ where: { state } });
 
     const config = this.getProviderConfig(provider);
-    const tokens = await this.exchangeCode(config, code, oauthState.codeVerifier);
+    const tokens = await this.exchangeCode(provider, config, code, oauthState.codeVerifier);
     const userInfo = await this.fetchUserInfo(config, tokens.access_token);
 
     if (!userInfo.email) {
@@ -134,10 +161,11 @@ export class OAuthService {
       userAgent,
     );
 
-    return result;
+    return { ...result, redirectTo };
   }
 
   private async exchangeCode(
+    provider: AuthProvider,
     config: OAuthProviderConfig,
     code: string,
     codeVerifier: string,
@@ -147,7 +175,7 @@ export class OAuthService {
       client_secret: config.clientSecret,
       code,
       grant_type: 'authorization_code',
-      redirect_uri: `${process.env.APP_URL}/auth/${config.scope.includes('openid') ? 'google' : 'github'}/callback`,
+      redirect_uri: this.getCallbackUrl(provider),
       code_verifier: codeVerifier,
     });
 
@@ -380,7 +408,7 @@ export class OAuthService {
 
     const params = new URLSearchParams({
       client_id: config.clientId,
-      redirect_uri: `${process.env.APP_URL}/auth/${provider.toLowerCase()}/callback`,
+      redirect_uri: this.getCallbackUrl(provider),
       response_type: 'code',
       scope: config.scope,
       state,
@@ -430,7 +458,7 @@ export class OAuthService {
     await prisma.oAuthState.delete({ where: { state } });
 
     const config = this.getProviderConfig(provider);
-    const tokens = await this.exchangeCode(config, code, oauthState.codeVerifier);
+    const tokens = await this.exchangeCode(provider, config, code, oauthState.codeVerifier);
     const userInfo = await this.fetchUserInfo(config, tokens.access_token);
 
     if (!userInfo.email) {
