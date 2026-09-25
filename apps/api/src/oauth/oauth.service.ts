@@ -209,7 +209,13 @@ export class OAuthService {
     const data = await response.json() as any;
 
     if (config.scope.includes('openid')) {
-      return { id: data.sub, email: data.email, name: data.name };
+      // OpenID userinfo returns `sub`; oauth2/v2/userinfo returns `id`.
+      const id = data.sub ?? data.id;
+      if (!id) {
+        this.logger.error({ keys: Object.keys(data) }, 'OAuth userinfo missing subject id');
+        throw new UnauthorizedException('OAuth provider returned no user id');
+      }
+      return { id: String(id), email: data.email, name: data.name };
     }
 
     let email = data.email;
@@ -224,6 +230,10 @@ export class OAuthService {
       }
     }
 
+    if (data.id == null) {
+      this.logger.error({ keys: Object.keys(data) }, 'OAuth userinfo missing user id');
+      throw new UnauthorizedException('OAuth provider returned no user id');
+    }
     return { id: String(data.id), email, name: data.name ?? data.login };
   }
 
@@ -250,11 +260,11 @@ export class OAuthService {
     try {
       return await this.createNewUser(provider, userInfo, ip, userAgent);
     } catch (err: any) {
-      // P2002 = unique constraint violation on @@unique([provider, providerAccountId])
-      // This fires when two concurrent callbacks race: both see null, both try to create.
-      // The second insert fails — recover by re-fetching the identity the first request created.
+      // P2002 = unique constraint violation
       if (err?.code === 'P2002') {
-        this.logger.warn({ provider, providerAccountId: userInfo.id }, 'Race condition on identity create, re-fetching');
+        this.logger.warn({ provider, providerAccountId: userInfo.id, target: err?.meta?.target }, 'P2002 on user create');
+
+        // Race: concurrent callbacks both saw no identity — re-fetch the one that won.
         const retryIdentity = await prisma.accountIdentity.findUnique({
           where: {
             provider_providerAccountId: {
@@ -267,7 +277,27 @@ export class OAuthService {
         if (retryIdentity) {
           return this.handleExistingUser(retryIdentity.user.id, retryIdentity.user.status, provider, ip, userAgent);
         }
-        // If still not found, something else went wrong — fall through to original error
+
+        // Email already belongs to an account (same person signed up via another
+        // provider, e.g. Google then GitHub). Link this identity to that user.
+        if (userInfo.email) {
+          const existingUser = await prisma.user.findUnique({
+            where: { email: userInfo.email },
+            select: { id: true, status: true },
+          });
+          if (existingUser) {
+            this.logger.warn({ provider, userId: existingUser.id }, 'Linking OAuth identity to existing user by email');
+            await prisma.accountIdentity.create({
+              data: {
+                userId: existingUser.id,
+                provider,
+                providerAccountId: userInfo.id,
+                email: userInfo.email,
+              },
+            });
+            return this.handleExistingUser(existingUser.id, existingUser.status, provider, ip, userAgent);
+          }
+        }
       }
       throw err;
     }
@@ -320,55 +350,55 @@ export class OAuthService {
     ip?: string,
     userAgent?: string,
   ): Promise<{ sessionToken: string; isNewUser: boolean }> {
-    const result = await prisma.$transaction(async (tx) => {
-      const slug = `org-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const result = await prisma.$transaction(
+      async (tx) => {
+        const slug = `org-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-      const user = await tx.user.create({
-        data: {
-          email: userInfo.email!,
-          name: userInfo.name ?? 'User',
-          emailVerified: true,
-          accountIdentities: {
-            create: {
-              provider,
-              providerAccountId: userInfo.id,
-              email: userInfo.email,
-            },
-          },
-          memberships: {
-            create: {
-              organization: {
-                create: {
-                  name: `${userInfo.name ?? 'My'} Organization`,
-                  slug,
-                  createdBy: 'system',
-                },
+        const user = await tx.user.create({
+          data: {
+            email: userInfo.email!,
+            name: userInfo.name ?? 'User',
+            emailVerified: true,
+            lastLoginAt: new Date(),
+            accountIdentities: {
+              create: {
+                provider,
+                providerAccountId: userInfo.id,
+                email: userInfo.email,
               },
-              role: OrgRole.OWNER,
+            },
+            memberships: {
+              create: {
+                organization: {
+                  create: {
+                    name: `${userInfo.name ?? 'My'} Organization`,
+                    slug,
+                    createdBy: 'system',
+                  },
+                },
+                role: OrgRole.OWNER,
+              },
             },
           },
-        },
-        select: { id: true },
-      });
+          select: { id: true },
+        });
 
-      const session = generateSessionToken();
-      await tx.session.create({
-        data: {
-          userId: user.id,
-          tokenHash: session.hash,
-          ipAddress: ip ?? null,
-          userAgent: userAgent ?? null,
-          expiresAt: sessionExpiresAt(),
-        },
-      });
+        const session = generateSessionToken();
+        await tx.session.create({
+          data: {
+            userId: user.id,
+            tokenHash: session.hash,
+            ipAddress: ip ?? null,
+            userAgent: userAgent ?? null,
+            expiresAt: sessionExpiresAt(),
+          },
+        });
 
-      await tx.user.update({
-        where: { id: user.id },
-        data: { lastLoginAt: new Date() },
-      });
-
-      return { sessionToken: session.raw, userId: user.id };
-    });
+        return { sessionToken: session.raw, userId: user.id };
+      },
+      // First interactive txn after cold start can exceed Prisma's 5s default
+      { maxWait: 10_000, timeout: 15_000 },
+    );
 
     this.audit.log({
       actorType: ActorType.USER,
