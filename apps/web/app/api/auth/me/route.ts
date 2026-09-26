@@ -17,7 +17,7 @@ export async function GET() {
 
     return NextResponse.json({
       authenticated: true,
-      user: { id: me.id, name: me.name, email: me.email },
+      user: { id: me.id, name: me.name, email: me.email, emailVerified: me.emailVerified ?? false },
       organizations: me.organizations,
     });
   } catch {

@@ -12,10 +12,14 @@ import {
   sessionExpiresAt,
 } from '@myplatform/auth';
 import { AuditService } from '../audit/audit.service.js';
+import { EmailVerificationService } from '../email/email-verification.service.js';
 
 @Injectable()
 export class AuthService {
-  constructor(private readonly audit: AuditService) {}
+  constructor(
+    private readonly audit: AuditService,
+    private readonly emailVerification: EmailVerificationService,
+  ) {}
 
   async register(
     dto: { email: string; password: string; name: string },
@@ -66,7 +70,16 @@ export class AuthService {
       userAgent,
     });
 
-    return { user, sessionToken: session.raw };
+    // Email/password signup only (OAuth users get emailVerified: true at
+    // creation in oauth.service createNewUser — Google/GitHub already
+    // verified the address). Login is NOT gated on verification; the code
+    // gates the verified badge/actions later.
+    // surfaced to the client so the UI can warn when delivery failed
+    // (NotificationHub down / misconfigured) instead of silently promising
+    // an email that never arrives.
+    const { sent: emailVerificationSent } = await this.emailVerification.issueCode(user);
+
+    return { user, sessionToken: session.raw, emailVerificationSent };
   }
 
   async login(

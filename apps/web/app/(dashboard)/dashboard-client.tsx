@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import AuthProvider, { useAuth } from "@/components/auth-provider";
 import ThemeToggle from "@/components/theme-toggle";
+import EmailVerifyBanner from "@/components/email-verify-banner";
 
 const NAV_ITEMS = [
   {
@@ -133,6 +134,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
         {/* Content */}
         <main className="flex-1 overflow-auto">
           <div className="mx-auto max-w-[920px] px-10 py-8">
+            <EmailVerifyBanner />
             {children}
           </div>
         </main>

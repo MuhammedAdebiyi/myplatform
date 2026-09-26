@@ -24,3 +24,9 @@ export {
 } from './oauth.js';
 
 export type { PkcePair } from './oauth.js';
+
+export {
+  generateVerificationCode,
+  hashVerificationCode,
+  verifyVerificationCode,
+} from './email-code.js';

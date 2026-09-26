@@ -6,11 +6,20 @@ import { ApiKeyGuard } from './guards/api-key.guard.js';
 import { LoginThrottlerGuard } from './guards/login-throttler.guard.js';
 import { AuditModule } from '../audit/audit.module.js';
 import { ApiKeysModule } from '../api-keys/api-keys.module.js';
+import { EmailVerificationService } from '../email/email-verification.service.js';
+import { NotificationHubService } from '../email/notification-hub.service.js';
 
 @Module({
   imports: [AuditModule, forwardRef(() => ApiKeysModule)],
   controllers: [AuthController],
-  providers: [AuthService, SessionGuard, ApiKeyGuard, LoginThrottlerGuard],
+  providers: [
+    AuthService,
+    SessionGuard,
+    ApiKeyGuard,
+    LoginThrottlerGuard,
+    EmailVerificationService,
+    NotificationHubService,
+  ],
   exports: [AuthService, SessionGuard, ApiKeyGuard],
 })
 export class AuthModule {}

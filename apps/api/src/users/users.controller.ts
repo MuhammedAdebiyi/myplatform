@@ -8,6 +8,7 @@ export interface MeResponse {
   id: string;
   name: string;
   email: string;
+  emailVerified: boolean;
   organizations: { id: string; name: string; slug: string; role: string }[];
 }
 
@@ -16,18 +17,25 @@ export interface MeResponse {
 export class UsersController {
   @Get()
   async me(@CurrentUser() user: CurrentUserType): Promise<MeResponse> {
-    const memberships = await prisma.membership.findMany({
-      where: { userId: user.id },
-      include: {
-        organization: { select: { id: true, name: true, slug: true } },
-      },
-      orderBy: { createdAt: 'asc' },
-    });
+    const [memberships, account] = await Promise.all([
+      prisma.membership.findMany({
+        where: { userId: user.id },
+        include: {
+          organization: { select: { id: true, name: true, slug: true } },
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.user.findUnique({
+        where: { id: user.id },
+        select: { emailVerified: true },
+      }),
+    ]);
 
     return {
       id: user.id,
       name: user.name,
       email: user.email,
+      emailVerified: account?.emailVerified ?? false,
       organizations: memberships.map((m) => ({
         id: m.organization.id,
         name: m.organization.name,

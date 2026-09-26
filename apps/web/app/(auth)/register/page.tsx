@@ -471,7 +471,13 @@ export default function RegisterPage() {
         return;
       }
 
-      router.push("/projects");
+      const data = await res.json();
+      // emailVerificationSent=false → NotificationHub didn't accept the send;
+      // tell the dashboard so the user isn't left waiting for an email that
+      // never went out.
+      const verifyParam =
+        data.emailVerificationSent === false ? "?verify=email-delayed" : "";
+      router.push(`/projects${verifyParam}`);
       router.refresh();
     } catch {
       setApiError("Something went wrong. Check your connection.");

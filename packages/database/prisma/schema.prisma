@@ -85,6 +85,7 @@ model User {
   accountIdentities AccountIdentity[]
   linkAccounts      LinkAccount[]     @relation("LinkAccountUser")
   linkedAccounts    LinkAccount[]     @relation("LinkAccountTarget")
+  emailVerificationCodes EmailVerificationCode[]
 }
 
 model Session {
@@ -382,4 +383,17 @@ model Deployment {
   updatedAt       DateTime         @updatedAt
 
   @@index([serviceId, createdAt])
+}
+
+model EmailVerificationCode {
+  id         String    @id @default(cuid())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String
+  codeHash   String
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
 }
