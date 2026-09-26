@@ -484,6 +484,7 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const from = searchParams.get("from") || "/projects";
   const oauthError = searchParams.get("error");
+  const resetSuccess = searchParams.get("reset") === "success";
   const oauthErrorMessage =
     oauthError === "oauth_not_configured"
       ? "Social sign-in is not configured on this server. Try email instead."
@@ -496,6 +497,9 @@ function LoginForm() {
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
   const [touched, setTouched] = useState<{ email?: boolean; password?: boolean }>({});
   const [apiError, setApiError] = useState(oauthErrorMessage);
+  const [successMessage, setSuccessMessage] = useState(
+    resetSuccess ? "Password updated — sign in with your new password." : "",
+  );
   const [loading, setLoading] = useState(false);
 
   const showError = (field: "email" | "password") => {
@@ -610,6 +614,34 @@ function LoginForm() {
           {/* Form */}
           <motion.form onSubmit={handleSubmit} variants={item} className="space-y-5">
             <AnimatePresence>
+              {successMessage && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8, scale: 0.96 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -8, scale: 0.96 }}
+                  className="flex items-start gap-3 rounded-xl border border-[var(--ok)]/30 bg-[var(--ok)]/5 px-4 py-3"
+                >
+                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--ok)]/15 text-[var(--ok)]">
+                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                    </svg>
+                  </span>
+                  <p className="text-sm text-[var(--ok)]">{successMessage}</p>
+                  <button
+                    type="button"
+                    onClick={() => setSuccessMessage("")}
+                    className="ml-auto shrink-0 text-[var(--ok)]/60 transition-colors hover:text-[var(--ok)]"
+                    aria-label="Dismiss"
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <AnimatePresence>
               {apiError && (
                 <motion.div
                   initial={{ opacity: 0, y: -8, scale: 0.96 }}
@@ -662,7 +694,7 @@ function LoginForm() {
                 <input type="checkbox" className="h-4 w-4 rounded border-[var(--border)] accent-[var(--accent)]" />
                 <span className="group-hover:text-[var(--fg)] transition-colors">Remember me</span>
               </label>
-              <Link href="#" className="text-sm font-medium text-[var(--accent)] hover:underline">
+              <Link href="/forgot-password" className="text-sm font-medium text-[var(--accent)] hover:underline">
                 Forgot password?
               </Link>
             </div>

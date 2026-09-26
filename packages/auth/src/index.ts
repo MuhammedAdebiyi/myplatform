@@ -30,3 +30,11 @@ export {
   hashVerificationCode,
   verifyVerificationCode,
 } from './email-code.js';
+
+export {
+  generatePasswordResetToken,
+  hashPasswordResetToken,
+  passwordResetExpiresAt,
+} from './reset-token.js';
+
+export type { PasswordResetToken } from './reset-token.js';
