@@ -2,8 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 
 // NotificationHub production API (verified against the NotificationHub repo docs
 // and source: POST /api/v1/notifications, X-Api-Key header, payload is a JSON
-// string of {subject, html} — CreateNotificationCommand has no template
-// reference; TemplateId exists only on Campaigns).
+// string). The docs advertise {subject, html}, but the deployed worker
+// (StubNotificationProvider.EmailPayload) only deserializes {subject, body} and
+// renders Html:"<p>{body}</p>"+pixel, Text:body — so "body" must carry the
+// email content or Text deserializes to null, SendByte rejects
+// "text: Expected string, received null" with 422, and the notification
+// dead-letters after 5 retries. We send both keys: body for the deployed
+// worker, html for spec compliance / future worker fixes.
+
 const DEFAULT_BASE_URL = 'https://api.notificationhub.space';
 
 export interface SendEmailInput {
@@ -64,7 +70,11 @@ export class NotificationHubService {
           recipientEmail: input.recipientEmail,
           type: input.type,
           channel: 'email',
-          payload: JSON.stringify({ subject: input.subject, html: input.html }),
+          payload: JSON.stringify({
+            subject: input.subject,
+            html: input.html,
+            body: input.html,
+          }),
         }),
         signal: AbortSignal.timeout(10_000),
       });
