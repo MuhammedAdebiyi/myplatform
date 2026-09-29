@@ -478,12 +478,13 @@ export default function RegisterPage() {
       }
 
       const data = await res.json();
-      // emailVerificationSent=false → NotificationHub didn't accept the send;
-      // tell the dashboard so the user isn't left waiting for an email that
-      // never went out.
-      const verifyParam =
-        data.emailVerificationSent === false ? "?verify=email-delayed" : "";
-      router.push(`/projects${verifyParam}`);
+      // Unverified sessions are gated at /verify-email (layout redirect +
+      // EmailVerifiedGuard on the API). If NotificationHub didn't accept the
+      // send, flag it so the verify page can say so inline instead of leaving
+      // the user waiting for an email that never went out.
+      const sendParam =
+        data.emailVerificationSent === false ? "?send=failed" : "";
+      router.push(`/verify-email${sendParam}`);
       router.refresh();
     } catch {
       setApiError("Something went wrong. Check your connection.");

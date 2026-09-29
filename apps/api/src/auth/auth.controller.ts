@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, HttpStatus, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service.js';
 import { EmailVerificationService } from '../email/email-verification.service.js';
 import { PasswordResetService } from './password-reset.service.js';
@@ -47,6 +47,18 @@ export class AuthController {
   @Post('verify-email')
   verifyEmail(@Body() dto: VerifyEmailDto, @CurrentUser() user: CurrentUser) {
     return this.emailVerification.verify(user.id, dto.code);
+  }
+
+  /**
+   * Drives the /verify-email page's auto-send on mount: accounts that
+   * registered before this feature (or whose code expired) have no active
+   * code and need one issued; fresh registrations already have one and must
+   * not receive a duplicate send.
+   */
+  @UseGuards(SessionGuard)
+  @Get('verification-status')
+  verificationStatus(@CurrentUser() user: CurrentUser) {
+    return this.emailVerification.hasActiveCode(user.id);
   }
 
   @UseGuards(SessionGuard, ResendVerificationThrottlerGuard)

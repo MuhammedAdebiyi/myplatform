@@ -163,6 +163,8 @@ export class AuthService {
             email: true,
             name: true,
             status: true,
+            // EmailVerifiedGuard reads this off request.user.
+            emailVerified: true,
           },
         },
       },

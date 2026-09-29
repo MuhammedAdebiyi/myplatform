@@ -173,6 +173,25 @@ export class EmailVerificationService {
   }
 
   /**
+   * Is there a usable code right now (unexpired, unconsumed)? The
+   * /verify-email page uses this on mount to decide whether to auto-send:
+   * false → no code was ever issued (pre-feature account) or it expired →
+   * auto-send; true → register just issued one → show the existing state
+   * and do not double-send.
+   */
+  async hasActiveCode(userId: string): Promise<{ hasActiveCode: boolean }> {
+    const active = await prisma.emailVerificationCode.findFirst({
+      where: {
+        userId,
+        consumedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      select: { id: true },
+    });
+    return { hasActiveCode: Boolean(active) };
+  }
+
+  /**
    * Invalidate any live code, issue + send a new one.
    * Rate limited by ResendVerificationThrottlerGuard (3/hour/user).
    */

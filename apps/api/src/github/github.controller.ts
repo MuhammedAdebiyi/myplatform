@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { GitHubService } from './github.service.js';
 import { SessionGuard } from '../auth/guards/session.guard.js';
+import { EmailVerifiedGuard } from '../auth/guards/email-verified.guard.js';
 import { ApiKeyGuard } from '../auth/guards/api-key.guard.js';
 import { OrganizationGuard } from '../rbac/guards/organization.guard.js';
 import { RequirePermissions } from '../rbac/decorators/require-permissions.decorator.js';
@@ -25,7 +26,7 @@ import { ConnectServiceDto } from './dto/connect-service.dto.js';
 export class GitHubController {
   constructor(private readonly githubService: GitHubService) {}
 
-  @UseGuards(SessionGuard, ApiKeyGuard, OrganizationGuard)
+  @UseGuards(SessionGuard, EmailVerifiedGuard, ApiKeyGuard, OrganizationGuard)
   @RequirePermissions(Permission.SERVICE_UPDATE)
   @Get('organizations/:organizationId/github/install')
   async install(
@@ -36,7 +37,7 @@ export class GitHubController {
     res.redirect(url);
   }
 
-  @UseGuards(SessionGuard, ApiKeyGuard, OrganizationGuard)
+  @UseGuards(SessionGuard, EmailVerifiedGuard, ApiKeyGuard, OrganizationGuard)
   @RequirePermissions(Permission.SERVICE_UPDATE)
   @Get('organizations/:organizationId/github/callback')
   async callback(
@@ -98,7 +99,7 @@ export class GitHubController {
     return { ok: true };
   }
 
-  @UseGuards(SessionGuard, ApiKeyGuard, OrganizationGuard)
+  @UseGuards(SessionGuard, EmailVerifiedGuard, ApiKeyGuard, OrganizationGuard)
   @RequirePermissions(Permission.SERVICE_READ)
   @Get('organizations/:organizationId/github/repositories')
   async listRepositories(
@@ -107,7 +108,7 @@ export class GitHubController {
     return this.githubService.listRepositories(organizationId);
   }
 
-  @UseGuards(SessionGuard, ApiKeyGuard, OrganizationGuard)
+  @UseGuards(SessionGuard, EmailVerifiedGuard, ApiKeyGuard, OrganizationGuard)
   @RequirePermissions(Permission.SERVICE_UPDATE)
   @Patch('organizations/:organizationId/github/services/:id/connect')
   async connectService(

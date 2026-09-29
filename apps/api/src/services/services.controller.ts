@@ -4,6 +4,7 @@ import { CreateServiceDto } from './dto/create-service.dto.js';
 import { CreateEnvVarDto } from './dto/create-env-var.dto.js';
 import { SessionGuard } from '../auth/guards/session.guard.js';
 import { ApiKeyGuard } from '../auth/guards/api-key.guard.js';
+import { EmailVerifiedGuard } from '../auth/guards/email-verified.guard.js';
 import { OrganizationGuard } from '../rbac/guards/organization.guard.js';
 import { RequirePermissions } from '../rbac/decorators/require-permissions.decorator.js';
 import { GetOrganizationId } from '../rbac/decorators/get-organization-id.decorator.js';
@@ -12,7 +13,7 @@ import type { AuthContext as AuthContextType } from '../auth/decorators/auth-con
 import { Permission } from '../rbac/permissions.js';
 import type { CursorPaginationQuery } from '../common/pagination.js';
 
-@UseGuards(SessionGuard, ApiKeyGuard, OrganizationGuard)
+@UseGuards(SessionGuard, EmailVerifiedGuard, ApiKeyGuard, OrganizationGuard)
 @Controller('organizations/:organizationId/projects/:projectId/services')
 export class ServicesController {
   constructor(private readonly services: ServicesService) {}

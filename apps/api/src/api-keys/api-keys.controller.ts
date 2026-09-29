@@ -4,6 +4,7 @@ import { ApiKeysThrottlerGuard } from './api-keys-throttler.guard.js';
 import { CreateApiKeyDto } from './dto/create-api-key.dto.js';
 import { SessionGuard } from '../auth/guards/session.guard.js';
 import { ApiKeyGuard } from '../auth/guards/api-key.guard.js';
+import { EmailVerifiedGuard } from '../auth/guards/email-verified.guard.js';
 import { OrganizationGuard } from '../rbac/guards/organization.guard.js';
 import { RequirePermissions } from '../rbac/decorators/require-permissions.decorator.js';
 import { GetOrganizationId } from '../rbac/decorators/get-organization-id.decorator.js';
@@ -12,7 +13,7 @@ import type { AuthContext as AuthContextType } from '../auth/decorators/auth-con
 import { Permission } from '../rbac/permissions.js';
 import type { CursorPaginationQuery } from '../common/pagination.js';
 
-@UseGuards(SessionGuard, ApiKeyGuard, OrganizationGuard, ApiKeysThrottlerGuard)
+@UseGuards(SessionGuard, EmailVerifiedGuard, ApiKeyGuard, OrganizationGuard, ApiKeysThrottlerGuard)
 @Controller('organizations/:organizationId/api-keys')
 export class ApiKeysController {
   constructor(private readonly apiKeys: ApiKeysService) {}

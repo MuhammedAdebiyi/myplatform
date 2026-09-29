@@ -3,6 +3,7 @@ import { AuthService } from './auth.service.js';
 import { AuthController } from './auth.controller.js';
 import { SessionGuard } from './guards/session.guard.js';
 import { ApiKeyGuard } from './guards/api-key.guard.js';
+import { EmailVerifiedGuard } from './guards/email-verified.guard.js';
 import { LoginThrottlerGuard } from './guards/login-throttler.guard.js';
 import { RegisterThrottlerGuard } from './guards/register-throttler.guard.js';
 import { ResendVerificationThrottlerGuard } from './guards/resend-verification-throttler.guard.js';
@@ -29,6 +30,7 @@ import { NotificationHubService } from '../email/notification-hub.service.js';
     AuthService,
     SessionGuard,
     ApiKeyGuard,
+    EmailVerifiedGuard,
     LoginThrottlerGuard,
     RegisterThrottlerGuard,
     ResendVerificationThrottlerGuard,
@@ -38,6 +40,6 @@ import { NotificationHubService } from '../email/notification-hub.service.js';
     EmailVerificationService,
     NotificationHubService,
   ],
-  exports: [AuthService, SessionGuard, ApiKeyGuard],
+  exports: [AuthService, SessionGuard, ApiKeyGuard, EmailVerifiedGuard],
 })
 export class AuthModule {}
