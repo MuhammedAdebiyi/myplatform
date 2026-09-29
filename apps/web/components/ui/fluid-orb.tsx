@@ -153,7 +153,7 @@ const FluidOrb = ({
     const uTime = gl.getUniformLocation(program, 'u_time')
     gl.uniform3f(gl.getUniformLocation(program, 'u_color'), ...hexToRgb(color))
 
-    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5)
     const px = Math.round(size * dpr)
     canvas.width = px
     canvas.height = px
@@ -163,16 +163,38 @@ const FluidOrb = ({
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     const start = performance.now()
     let raf = 0
+    let running = false
+    let inView = true
 
     const render = (now: number) => {
       gl.uniform1f(uTime, reduce ? 0 : (now - start) / 1000)
       gl.drawArrays(gl.TRIANGLES, 0, 6)
-      if (!reduce) raf = requestAnimationFrame(render)
+      if (running && inView && !reduce) {
+        raf = requestAnimationFrame(render)
+      } else {
+        running = false
+      }
     }
+
+    // Stop burning GPU when scrolled offscreen (multiple orbs = multiple
+    // WebGL contexts; Safari is the first to choke on continuous RAF loops).
+    const startLoop = () => {
+      if (running || reduce || !inView) return
+      running = true
+      raf = requestAnimationFrame(render)
+    }
+    const io = new IntersectionObserver((entries) => {
+      inView = entries[0]?.isIntersecting ?? true
+      if (inView) startLoop()
+    })
+    io.observe(canvas)
     render(start)
+    startLoop()
 
     return () => {
+      running = false
       cancelAnimationFrame(raf)
+      io.disconnect()
       gl.deleteProgram(program)
       gl.deleteShader(vert)
       gl.deleteShader(frag)

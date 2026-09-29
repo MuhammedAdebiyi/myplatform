@@ -4,25 +4,33 @@ import Link from "next/link";
 import { Suspense, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 
-/* ─── Background ─── */
+/* ─── Background ───
+   Blur stays on static children — Safari re-rasterizes filter: blur() when the
+   filtered element itself animates; wrappers only get cheap transforms. */
 function GradientMesh() {
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
       <motion.div
-        className="absolute -top-1/2 -left-1/2 h-full w-full rounded-full bg-gradient-to-br from-[var(--accent)]/20 via-transparent to-transparent blur-[100px]"
+        className="absolute -top-1/2 -left-1/2 h-full w-full"
         animate={{ rotate: [0, 360] }}
         transition={{ duration: 60, repeat: Infinity, ease: "linear" }}
-      />
+      >
+        <div className="h-full w-full rounded-full bg-gradient-to-br from-[var(--accent)]/20 via-transparent to-transparent blur-[100px]" />
+      </motion.div>
       <motion.div
-        className="absolute -bottom-1/2 -right-1/2 h-full w-full rounded-full bg-gradient-to-tl from-[#818CF8]/15 via-transparent to-transparent blur-[100px]"
+        className="absolute -bottom-1/2 -right-1/2 h-full w-full"
         animate={{ rotate: [360, 0] }}
         transition={{ duration: 80, repeat: Infinity, ease: "linear" }}
-      />
+      >
+        <div className="h-full w-full rounded-full bg-gradient-to-tl from-[#818CF8]/15 via-transparent to-transparent blur-[100px]" />
+      </motion.div>
       <motion.div
-        className="absolute top-1/3 right-1/4 h-64 w-64 rounded-full bg-[var(--accent)]/5 blur-[80px]"
+        className="absolute top-1/3 right-1/4 h-64 w-64"
         animate={{ scale: [1, 1.3, 1], opacity: [0.3, 0.6, 0.3] }}
         transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
-      />
+      >
+        <div className="h-full w-full rounded-full bg-[var(--accent)]/5 blur-[80px]" />
+      </motion.div>
     </div>
   );
 }

@@ -79,20 +79,26 @@ function AuthParticles() {
   );
 }
 
-/* ─── Gradient mesh ─── */
+/* ─── Gradient mesh ───
+   Blur stays on static children — Safari re-rasterizes filter: blur() when the
+   filtered element itself animates; wrappers only get cheap transforms. */
 function GradientMesh() {
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
       <motion.div
-        className="absolute -top-1/2 -right-1/2 h-full w-full rounded-full bg-gradient-to-bl from-[var(--accent)]/20 via-transparent to-transparent blur-[100px]"
+        className="absolute -top-1/2 -right-1/2 h-full w-full"
         animate={{ rotate: [0, 360] }}
         transition={{ duration: 60, repeat: Infinity, ease: "linear" }}
-      />
+      >
+        <div className="h-full w-full rounded-full bg-gradient-to-bl from-[var(--accent)]/20 via-transparent to-transparent blur-[100px]" />
+      </motion.div>
       <motion.div
-        className="absolute -bottom-1/2 -left-1/2 h-full w-full rounded-full bg-gradient-to-tr from-[#818CF8]/15 via-transparent to-transparent blur-[100px]"
+        className="absolute -bottom-1/2 -left-1/2 h-full w-full"
         animate={{ rotate: [360, 0] }}
         transition={{ duration: 80, repeat: Infinity, ease: "linear" }}
-      />
+      >
+        <div className="h-full w-full rounded-full bg-gradient-to-tr from-[#818CF8]/15 via-transparent to-transparent blur-[100px]" />
+      </motion.div>
     </div>
   );
 }
