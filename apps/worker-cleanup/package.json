@@ -7,5 +7,15 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@myplatform/database": "workspace:^",
+    "@myplatform/queue": "workspace:^",
+    "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "22",
+    "tsx": "^4.23.13",
+    "typescript": "~5.6.3"
   }
 }

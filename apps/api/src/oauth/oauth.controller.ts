@@ -1,9 +1,12 @@
 import {
+  Body,
   Controller,
   Get,
   Delete,
+  HttpCode,
   Query,
   Param,
+  Post,
   Req,
   Res,
   UnauthorizedException,
@@ -25,15 +28,20 @@ export class OAuthController {
     return (process.env.APP_URL || 'http://localhost:3000').replace(/\/$/, '');
   }
 
-  /** After the API finishes the code exchange, hand the browser to the web app to set mp_session. */
+  /**
+   * After the API finishes the code exchange, hand the browser to the web app
+   * with a ONE-TIME handoff code (KR-004) — never the session token itself.
+   * The web app's /api/auth/oauth route exchanges the code server-to-server.
+   */
   private completeOnFrontend(
     res: any,
     sessionToken: string,
     isNewUser: boolean,
     redirectTo: string | null,
   ) {
+    const code = this.oauthService.createHandoffCode(sessionToken);
     const params = new URLSearchParams({
-      token: sessionToken,
+      code,
       new: String(isNewUser),
     });
     if (redirectTo) params.set('redirect_to', redirectTo);
@@ -42,6 +50,23 @@ export class OAuthController {
 
   private failOnFrontend(res: any, code = 'oauth_failed') {
     res.redirect(`${this.appUrl()}/login?error=${code}`);
+  }
+
+  /**
+   * Exchange a one-time handoff code for the session token (KR-004). Called
+   * server-side by the web app; the token never travels in a URL.
+   */
+  @Post('exchange')
+  @HttpCode(200)
+  async exchangeHandoffCode(@Body() body: { code?: string }) {
+    if (!body?.code) {
+      throw new UnauthorizedException('Missing handoff code');
+    }
+    const sessionToken = await this.oauthService.consumeHandoffCode(body.code);
+    if (!sessionToken) {
+      throw new UnauthorizedException('Invalid or expired handoff code');
+    }
+    return { sessionToken };
   }
 
   @UseGuards(OAuthThrottlerGuard)

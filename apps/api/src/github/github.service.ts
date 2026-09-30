@@ -147,38 +147,65 @@ export class GitHubService {
       },
     });
 
-    for (const repo of repos.repositories) {
-      await prisma.gitHubRepository.upsert({
-        where: { githubRepoId: BigInt(repo.id) },
-        create: {
-          installationId: installation.id,
-          githubRepoId: BigInt(repo.id),
-          name: repo.name,
-          fullName: repo.full_name,
-          private: repo.private,
-          defaultBranch: repo.default_branch,
-        },
-        update: {
-          name: repo.name,
-          fullName: repo.full_name,
-          private: repo.private,
-          defaultBranch: repo.default_branch,
-        },
+    if (repos.repositories.length === 0) return;
+
+    // Batched upsert (RULE 12 write-side): one transaction instead of N
+    // sequential round trips. createMany can't upsert in Prisma, so group by
+    // existence and issue one createMany + one batched update via transaction.
+    const existingIds = await prisma.gitHubRepository.findMany({
+      where: { installationId: installation.id, githubRepoId: { in: githubRepoIds } },
+      select: { githubRepoId: true },
+    });
+    const existingSet = new Set(existingIds.map((r) => r.githubRepoId.toString()));
+
+    const toCreate = repos.repositories.filter((r) => !existingSet.has(String(r.id)));
+    const toUpdate = repos.repositories.filter((r) => existingSet.has(String(r.id)));
+
+    await prisma.$transaction([
+      ...(toCreate.length
+        ? [
+            prisma.gitHubRepository.createMany({
+              data: toCreate.map((repo) => ({
+                installationId: installation.id,
+                githubRepoId: BigInt(repo.id),
+                name: repo.name,
+                fullName: repo.full_name,
+                private: repo.private,
+                defaultBranch: repo.default_branch,
+              })),
+            }),
+          ]
+        : []),
+      ...toUpdate.map((repo) =>
+        prisma.gitHubRepository.update({
+          where: { githubRepoId: BigInt(repo.id) },
+          data: {
+            name: repo.name,
+            fullName: repo.full_name,
+            private: repo.private,
+            defaultBranch: repo.default_branch,
+          },
+        }),
+      ),
+    ]);
+  }
+
+  /**
+   * Atomic delivery claim (RULE 21): a single INSERT against the deliveryId
+   * unique constraint. Returns false when the delivery was already recorded
+   * (P2002), closing the concurrent-delivery race in the old
+   * findDelivery/recordDelivery pair.
+   */
+  async claimDelivery(deliveryId: string, event: string): Promise<boolean> {
+    try {
+      await prisma.webhookDelivery.create({
+        data: { deliveryId, event },
       });
+      return true;
+    } catch (err: any) {
+      if (err?.code === 'P2002') return false;
+      throw err;
     }
-  }
-
-  async findDelivery(deliveryId: string): Promise<boolean> {
-    const existing = await prisma.webhookDelivery.findUnique({
-      where: { deliveryId },
-    });
-    return !!existing;
-  }
-
-  async recordDelivery(deliveryId: string, event: string): Promise<void> {
-    await prisma.webhookDelivery.create({
-      data: { deliveryId, event },
-    });
   }
 
   async listRepositories(organizationId: string) {
@@ -287,17 +314,26 @@ export class GitHubService {
     });
 
     for (const service of services) {
-      const deployment = await prisma.deployment.create({
-        data: {
-          serviceId: service.id,
-          status: 'PENDING',
-          commitSha,
-        },
-      });
-
-      await this.buildQueue.add('build', {
-        deploymentId: deployment.id,
-        serviceId: service.id,
+      // Outbox (RULE 23): deployment row + event commit together; the queue
+      // enqueue is done by the outbox pump, so a Redis blip between commit
+      // and add can no longer strand a push-triggered deployment.
+      const [, outboxEvent] = await prisma.$transaction(async (tx) => {
+        const deployment = await tx.deployment.create({
+          data: {
+            serviceId: service.id,
+            status: 'PENDING',
+            commitSha,
+          },
+        });
+        const event = await tx.outboxEvent.create({
+          data: {
+            aggregate: 'Deployment',
+            aggregateId: deployment.id,
+            eventType: 'deployment.created',
+            payload: { deploymentId: deployment.id, serviceId: service.id, commitSha },
+          },
+        });
+        return [deployment, event] as const;
       });
 
       this.audit.log({
@@ -305,8 +341,8 @@ export class GitHubService {
         actorType: ActorType.SYSTEM,
         action: 'deployment.enqueue',
         resourceType: 'Deployment',
-        resourceId: deployment.id,
-        metadata: { serviceId: service.id, commitSha, branch },
+        resourceId: outboxEvent.aggregateId,
+        metadata: { serviceId: service.id, commitSha, branch, via: 'outbox' },
       });
     }
   }

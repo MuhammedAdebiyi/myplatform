@@ -38,3 +38,9 @@ export {
 } from './reset-token.js';
 
 export type { PasswordResetToken } from './reset-token.js';
+
+export {
+  encryptSecret,
+  decryptSecret,
+  isEncryptedValue,
+} from './env-secret.js';
