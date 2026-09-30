@@ -8,5 +8,8 @@
     "dev": "turbo run dev",
     "lint": "turbo run lint",
     "test": "turbo run test"
+  },
+  "devDependencies": {
+    "turbo": "^2"
   }
 }

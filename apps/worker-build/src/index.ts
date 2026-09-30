@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { prisma } from '@myplatform/database';
-import { createWorker } from '@myplatform/queue';
+import { createQueue, createWorker } from '@myplatform/queue';
 import {
   generateAppJwt,
   createInstallationAccessToken,
@@ -21,6 +21,20 @@ const execFileAsync = promisify(execFile);
 interface BuildJobData {
   deploymentId: string;
   serviceId: string;
+  // Outbox-wrapped payloads (RULE 23) carry these extra fields; legacy bare
+  // payloads (push-event direct enqueue) omit them.
+  eventType?: string;
+}
+
+/**
+ * Extract outbox-wrapped or bare job payloads. The outbox pump publishes
+ * { outboxEventId, eventType, payload: {deploymentId, serviceId} } while the
+ * legacy push path enqueues { deploymentId, serviceId } directly.
+ */
+function unwrapJobData(raw: BuildJobData): { deploymentId: string; serviceId: string } {
+  const wrapped = raw as unknown as { payload?: { deploymentId: string; serviceId: string } };
+  if (wrapped.payload?.deploymentId) return wrapped.payload;
+  return { deploymentId: raw.deploymentId, serviceId: raw.serviceId };
 }
 
 const log = {
@@ -69,14 +83,31 @@ async function runDockerBuild(
   }
 }
 
+/**
+ * Load the service's env vars for the deploy snapshot. Secret values are
+ * passed to the container at runtime by worker-deploy — they never enter
+ * build logs or this job's output (RULE 07). Values stay encrypted at rest
+ * until worker-deploy decrypts them just before container creation.
+ */
+async function loadServiceEnvVars(serviceId: string): Promise<Array<{ key: string; value: string; isSecret: boolean }>> {
+  const rows = await prisma.envVar.findMany({
+    where: { serviceId },
+    select: { key: true, value: true, isSecret: true },
+  });
+  return rows;
+}
+
+let deployQueue: ReturnType<typeof createQueue> | undefined;
+
 async function start() {
   log.info('worker-build starting — consuming build queue');
+  deployQueue = createQueue('deploy');
 
   const worker = createWorker<BuildJobData>(
     'build',
     async (job) => {
-      const { deploymentId, serviceId } = job.data;
-      log.info('build job received', { deploymentId, serviceId, jobId: job.id });
+      const { deploymentId, serviceId } = unwrapJobData(job.data);
+      log.info('build job received', { deploymentId, serviceId, jobId: job.id, eventType: job.data.eventType });
 
       // Look up service + repo
       const service = await prisma.service.findUnique({
@@ -98,13 +129,44 @@ async function start() {
         return;
       }
 
-      const commitSha = await getCommitSha(deploymentId);
-
-      // Mark BUILDING
-      await prisma.deployment.update({
+      // RULE 22/27: verify state from the DB before executing. A stale,
+      // cancelled, or unknown deploymentId fails the job gracefully instead
+      // of building something nobody asked for.
+      const deployment = await prisma.deployment.findUnique({
         where: { id: deploymentId },
+        select: { id: true, status: true, commitSha: true, service: { select: { lifecycle: true } } },
+      });
+
+      if (!deployment) {
+        log.error('deployment not found — skipping build', { deploymentId });
+        return;
+      }
+      if (deployment.status === 'CANCELLED') {
+        log.warn('deployment already cancelled — skipping build', { deploymentId });
+        return;
+      }
+      if (deployment.service.lifecycle !== 'ACTIVE') {
+        await prisma.deployment.update({
+          where: { id: deploymentId },
+          data: { status: 'CANCELLED' },
+        });
+        log.warn('service is DELETING — cancelling build', { deploymentId });
+        return;
+      }
+
+      const commitSha = deployment.commitSha || 'HEAD';
+
+      // Claim the build atomically: only claim from PENDING. A concurrent
+      // cancel between the queue and here flips status to CANCELLED, and this
+      // updateMany matches 0 rows — the cancel wins (RULE 24 state machine).
+      const claimed = await prisma.deployment.updateMany({
+        where: { id: deploymentId, status: 'PENDING' },
         data: { status: 'BUILDING' },
       });
+      if (claimed.count !== 1) {
+        log.warn('deployment no longer PENDING — skipping build', { deploymentId });
+        return;
+      }
       log.info('deployment marked BUILDING', { deploymentId });
 
       let buildDir: string | null = null;
@@ -150,15 +212,30 @@ async function start() {
             'inspect', '--format={{index .RepoDigests 0}}', result.imageTag,
           ]).catch(() => ({ stdout: result.imageTag }));
 
+          // BUILD_SUCCEEDED semantics: a successful docker build puts the
+          // deployment in DEPLOYING — worker-deploy runs the container and
+          // flips it to HEALTHY after the health check passes (RULE 24).
           await prisma.deployment.update({
             where: { id: deploymentId },
             data: {
-              status: 'HEALTHY',
+              status: 'DEPLOYING',
               imageDigest: stdout.trim() || result.imageTag,
               buildLog: result.log.slice(-10000), // last 10KB of build log
+              configSnapshot: {
+                imageTag: result.imageTag,
+                startCommand: service.startCommand,
+                envVars: await loadServiceEnvVars(serviceId),
+              },
             },
           });
-          log.info('deployment marked HEALTHY', { deploymentId, imageTag: result.imageTag });
+          log.info('deployment marked DEPLOYING', { deploymentId, imageTag: result.imageTag });
+
+          // Hand off to worker-deploy (RULE 24 state machine):
+          // PENDING → BUILDING → DEPLOYING → HEALTHY/FAILED.
+          await deployQueue?.add('deploy', {
+            deploymentId,
+            serviceId,
+          });
         } else {
           await prisma.deployment.update({
             where: { id: deploymentId },
@@ -197,14 +274,6 @@ async function start() {
   });
 
   log.info('worker-build ready');
-}
-
-async function getCommitSha(deploymentId: string): Promise<string> {
-  const deployment = await prisma.deployment.findUniqueOrThrow({
-    where: { id: deploymentId },
-    select: { commitSha: true },
-  });
-  return deployment.commitSha || 'HEAD';
 }
 
 start().catch((err) => {

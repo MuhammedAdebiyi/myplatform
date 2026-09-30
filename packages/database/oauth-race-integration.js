@@ -107,7 +107,6 @@ async function createNewUser(provider, userInfo, ip, userAgent) {
               create: {
                 name: `${userInfo.name ?? 'My'} Organization`,
                 slug,
-                createdBy: 'system',
               },
             },
             role: OrgRole.OWNER,

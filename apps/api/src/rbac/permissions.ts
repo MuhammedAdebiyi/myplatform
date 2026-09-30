@@ -8,8 +8,20 @@ export const Permission = {
   SERVICE_READ: 'service:read',
   SERVICE_UPDATE: 'service:update',
   SERVICE_DELETE: 'service:delete',
+  SERVICE_DEPLOY: 'service:deploy',
+
+  DEPLOYMENT_CREATE: 'deployment:create',
+  DEPLOYMENT_READ: 'deployment:read',
+  DEPLOYMENT_CANCEL: 'deployment:cancel',
+  DEPLOYMENT_ROLLBACK: 'deployment:rollback',
+
+  DOMAIN_MANAGE: 'domain:manage',
+  DOMAIN_READ: 'domain:read',
+
+  SECRETS_MANAGE: 'secrets:manage',
 
   MEMBER_INVITE: 'member:invite',
+  MEMBER_UPDATE: 'member:update',
   MEMBER_REMOVE: 'member:remove',
   MEMBER_LIST: 'member:list',
 
@@ -37,7 +49,16 @@ const ROLE_PERMISSIONS: Record<OrgRole, Permission[]> = {
     Permission.SERVICE_READ,
     Permission.SERVICE_UPDATE,
     Permission.SERVICE_DELETE,
+    Permission.SERVICE_DEPLOY,
+    Permission.DEPLOYMENT_CREATE,
+    Permission.DEPLOYMENT_READ,
+    Permission.DEPLOYMENT_CANCEL,
+    Permission.DEPLOYMENT_ROLLBACK,
+    Permission.DOMAIN_MANAGE,
+    Permission.DOMAIN_READ,
+    Permission.SECRETS_MANAGE,
     Permission.MEMBER_INVITE,
+    Permission.MEMBER_UPDATE,
     Permission.MEMBER_REMOVE,
     Permission.MEMBER_LIST,
     Permission.API_KEY_CREATE,
@@ -52,16 +73,26 @@ const ROLE_PERMISSIONS: Record<OrgRole, Permission[]> = {
     Permission.SERVICE_CREATE,
     Permission.SERVICE_READ,
     Permission.SERVICE_UPDATE,
+    Permission.SERVICE_DEPLOY,
+    Permission.DEPLOYMENT_CREATE,
+    Permission.DEPLOYMENT_READ,
+    Permission.DEPLOYMENT_CANCEL,
+    Permission.DEPLOYMENT_ROLLBACK,
+    Permission.DOMAIN_READ,
     Permission.MEMBER_LIST,
   ],
   [OrgRole.MEMBER]: [
     Permission.PROJECT_READ,
     Permission.SERVICE_READ,
+    Permission.DEPLOYMENT_READ,
+    Permission.DOMAIN_READ,
     Permission.MEMBER_LIST,
   ],
   [OrgRole.VIEWER]: [
     Permission.PROJECT_READ,
     Permission.SERVICE_READ,
+    Permission.DEPLOYMENT_READ,
+    Permission.DOMAIN_READ,
   ],
 };
 
@@ -72,3 +103,23 @@ export function getPermissionsForRole(role: OrgRole): readonly Permission[] {
 export function hasPermission(role: OrgRole, permission: Permission): boolean {
   return ROLE_PERMISSIONS[role]?.includes(permission) ?? false;
 }
+
+/** Permissions a machine API key can hold (subset of human roles). */
+export const API_KEY_PERMISSIONS: Permission[] = [
+  Permission.PROJECT_READ,
+  Permission.PROJECT_CREATE,
+  Permission.PROJECT_UPDATE,
+  Permission.PROJECT_DELETE,
+  Permission.SERVICE_READ,
+  Permission.SERVICE_CREATE,
+  Permission.SERVICE_UPDATE,
+  Permission.SERVICE_DELETE,
+  Permission.SERVICE_DEPLOY,
+  Permission.DEPLOYMENT_CREATE,
+  Permission.DEPLOYMENT_READ,
+  Permission.DEPLOYMENT_CANCEL,
+  Permission.DEPLOYMENT_ROLLBACK,
+  Permission.DOMAIN_READ,
+  Permission.MEMBER_LIST,
+  Permission.AUDIT_READ,
+];

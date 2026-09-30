@@ -75,12 +75,13 @@ export class GitHubController {
     const deliveryId = req.headers['x-github-delivery'] as string;
     const payload = req.body;
 
-    const existingDelivery = await this.githubService.findDelivery(deliveryId);
-    if (existingDelivery) {
+    // Atomic dedup: a single INSERT relying on the unique constraint. Two
+    // concurrent deliveries of the same deliveryId can no longer both pass a
+    // check-then-create race — the loser gets P2002 and short-circuits.
+    const claimed = await this.githubService.claimDelivery(deliveryId, event);
+    if (!claimed) {
       return { ok: true, duplicated: true };
     }
-
-    await this.githubService.recordDelivery(deliveryId, event);
 
     switch (event) {
       case 'installation':

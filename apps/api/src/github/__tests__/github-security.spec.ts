@@ -31,6 +31,10 @@ jest.mock('@myplatform/database', () => {
         findUnique: jest.fn(),
         create: jest.fn(),
       },
+      outboxEvent: {
+        create: jest.fn(),
+      },
+      $transaction: jest.fn(),
       service: {
         findFirst: jest.fn(),
         findMany: jest.fn(),
@@ -298,22 +302,34 @@ describe('GitHub Integration Security (RULE 33 adversarial tests)', () => {
   });
 
   describe('Adversarial: Webhook delivery idempotency', () => {
-    it('findDelivery returns true for already-processed delivery', async () => {
-      (prisma.webhookDelivery.findUnique as jest.Mock).mockResolvedValue({
+    it('claimDelivery returns true when the insert wins (new delivery)', async () => {
+      (prisma.webhookDelivery.create as jest.Mock).mockResolvedValue({
         id: 'del-1',
-        deliveryId: 'already-seen',
+        deliveryId: 'new-delivery',
         event: 'push',
       });
 
-      const result = await githubService.findDelivery('already-seen');
+      const result = await githubService.claimDelivery('new-delivery', 'push');
       expect(result).toBe(true);
     });
 
-    it('findDelivery returns false for new delivery', async () => {
-      (prisma.webhookDelivery.findUnique as jest.Mock).mockResolvedValue(null);
+    it('claimDelivery returns false when the deliveryId already exists (P2002)', async () => {
+      (prisma.webhookDelivery.create as jest.Mock).mockRejectedValue(
+        Object.assign(new Error('Unique constraint failed'), { code: 'P2002' }),
+      );
 
-      const result = await githubService.findDelivery('new-delivery');
+      const result = await githubService.claimDelivery('already-seen', 'push');
       expect(result).toBe(false);
+    });
+
+    it('claimDelivery rethrows non-P2002 errors', async () => {
+      (prisma.webhookDelivery.create as jest.Mock).mockRejectedValue(
+        new Error('connection refused'),
+      );
+
+      await expect(githubService.claimDelivery('x', 'push')).rejects.toThrow(
+        'connection refused',
+      );
     });
   });
 });

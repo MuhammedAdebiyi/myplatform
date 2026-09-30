@@ -48,7 +48,6 @@ async function seed(basePrisma) {
       data: {
         name: `Org ${orgIdx}`,
         slug: `org-${orgIdx}`,
-        createdBy: users[0].id,
       },
     });
 
@@ -214,7 +213,6 @@ async function main() {
       data: {
         name: `Org scale-${i}`,
         slug: `org-scale-${i}`,
-        createdBy: users[1].id,
       },
     });
     await scalePrisma.membership.create({

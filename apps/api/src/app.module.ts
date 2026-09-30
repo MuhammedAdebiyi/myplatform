@@ -10,6 +10,7 @@ import { ProjectsModule } from './projects/projects.module.js';
 import { ServicesModule } from './services/services.module.js';
 import { UsersModule } from './users/users.module.js';
 import { GitHubModule } from './github/github.module.js';
+import { DeploymentsModule } from './deployments/deployments.module.js';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { GitHubModule } from './github/github.module.js';
     ServicesModule,
     UsersModule,
     GitHubModule,
+    DeploymentsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

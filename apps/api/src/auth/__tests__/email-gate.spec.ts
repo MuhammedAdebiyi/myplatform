@@ -211,7 +211,6 @@ function wirePrismaMocks() {
       id: `org_${store.orgs.length + 1}`,
       name: data.name,
       slug: data.slug,
-      createdBy: data.createdBy,
       createdAt: new Date(),
     };
     store.orgs.push(o);
@@ -255,7 +254,7 @@ function seedOAuthUser(email: string) {
 }
 
 function seedOrg(id: string, slug: string) {
-  const o = { id, name: 'API Key Org', slug, createdBy: 'usr_seed', createdAt: new Date() };
+  const o = { id, name: 'API Key Org', slug, createdAt: new Date() };
   store.orgs.push(o);
   return o;
 }

@@ -1,6 +1,7 @@
 import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
 import { prisma, AuthProvider, ActorType, OrgRole } from '@myplatform/database';
 import { generatePkcePair, generateOAuthState, hashSessionToken, sessionExpiresAt, generateSessionToken } from '@myplatform/auth';
+import { randomBytes, createHash } from 'node:crypto';
 import { AuditService } from '../audit/audit.service.js';
 import { paginateQuery, parseLimit } from '../common/pagination.js';
 
@@ -373,7 +374,6 @@ export class OAuthService {
                   create: {
                     name: `${userInfo.name ?? 'My'} Organization`,
                     slug,
-                    createdBy: 'system',
                   },
                 },
                 role: OrgRole.OWNER,
@@ -412,6 +412,63 @@ export class OAuthService {
     });
 
     return { sessionToken: result.sessionToken, isNewUser: true };
+  }
+
+  // ─── KR-004: one-time handoff codes ────────────────────────────
+  //
+  // The OAuth callback redirect carries a short-lived single-use CODE, not
+  // the session token. The web app exchanges it server-to-server (POST
+  // /auth/exchange) so the session token never appears in a URL, browser
+  // history, proxy logs, or Referer headers.
+  //
+  // The session token is stored plaintext in the handoff row — equivalent to
+  // a session row itself; it's server-side only data with a 60s TTL.
+
+  private static HANDOFF_TTL_MS = 60_000;
+
+  createHandoffCode(sessionToken: string): string {
+    const code = randomBytes(32).toString('base64url');
+    const codeHash = createHash('sha256').update(code).digest('hex');
+
+    // Fire-and-forget write: the redirect must not wait on the DB beyond
+    // normal latency, and a failed write means the exchange will fail
+    // closed (invalid code) — safe direction.
+    void prisma.oAuthHandoffCode
+      .create({
+        data: {
+          codeHash,
+          sessionToken,
+          expiresAt: new Date(Date.now() + OAuthService.HANDOFF_TTL_MS),
+        },
+      })
+      .catch((err) =>
+        this.logger.error({ err }, 'failed to persist OAuth handoff code'),
+      );
+
+    return code;
+  }
+
+  /** Single-use: consumed atomically; expired/consumed codes return null. */
+  async consumeHandoffCode(code: string): Promise<string | null> {
+    const codeHash = createHash('sha256').update(code).digest('hex');
+
+    // Atomic single-use claim, same pattern as password-reset tokens: a
+    // concurrent replay of the same code loses the race (count 0).
+    const claimed = await prisma.oAuthHandoffCode.updateMany({
+      where: {
+        codeHash,
+        consumedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      data: { consumedAt: new Date() },
+    });
+    if (claimed.count !== 1) return null;
+
+    const row = await prisma.oAuthHandoffCode.findUnique({
+      where: { codeHash },
+      select: { sessionToken: true },
+    });
+    return row?.sessionToken ?? null;
   }
 
   async createLinkUrl(

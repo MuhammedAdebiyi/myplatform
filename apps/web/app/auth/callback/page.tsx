@@ -9,9 +9,14 @@ function CallbackContent() {
   const searchParams = useSearchParams();
 
   useEffect(() => {
-    const token = searchParams.get("token");
-    if (token) {
-      fetch(`/api/auth/oauth?token=${encodeURIComponent(token)}`).then(() => {
+    // KR-004: the API hands us a one-time code; this page navigates to the
+    // web route that exchanges it server-to-server for the session cookie.
+    const code = searchParams.get("code");
+    if (code) {
+      const redirectTo = searchParams.get("redirect_to");
+      const params = new URLSearchParams({ code });
+      if (redirectTo) params.set("redirect_to", redirectTo);
+      fetch(`/api/auth/oauth?${params.toString()}`).then(() => {
         router.push("/projects");
         router.refresh();
       });

@@ -42,6 +42,14 @@ enum ServiceType {
   PRIVATE_SERVICE
 }
 
+// Lifecycle states (scope §32): deletion is asynchronous — DELETE marks
+// DELETING, enqueues cleanup, and the cleanup worker finalizes to DELETED.
+enum ResourceLifecycle {
+  ACTIVE
+  DELETING
+  DELETED
+}
+
 enum DeploymentStrategy {
   RECREATE
   ROLLING
@@ -62,6 +70,7 @@ enum DeploymentStatus {
   HEALTHY
   FAILED
   ROLLED_BACK
+  CANCELLED
 }
 
 // ───────────────────────── identity ─────────────────────────
@@ -122,7 +131,7 @@ model Organization {
   id        String   @id @default(cuid())
   name      String
   slug      String   @unique
-  createdBy String
+  lifecycle ResourceLifecycle @default(ACTIVE)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -212,6 +221,21 @@ model AccountIdentity {
   @@index([userId])
 }
 
+// KR-004: one-time exchange codes for the OAuth handoff. The API redirects
+// the browser to the web app with a short-lived code; the web app exchanges
+// it server-to-server for the real session token. Session tokens never
+// appear in URLs.
+model OAuthHandoffCode {
+  id           String   @id @default(cuid())
+  codeHash     String   @unique
+  sessionToken String
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  createdAt    DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
 model OAuthState {
   id               String        @id @default(cuid())
   state            String        @unique
@@ -299,6 +323,7 @@ model Project {
   organizationId String
   name           String
   slug           String
+  lifecycle      ResourceLifecycle @default(ACTIVE)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -316,9 +341,10 @@ model Service {
   // with project.organizationId transactionally, never written independently
   organizationId String
 
-  name   String
-  type   ServiceType
-  region String      @default("default")
+  name      String
+  type      ServiceType
+  region    String            @default("default")
+  lifecycle ResourceLifecycle @default(ACTIVE)
 
   repoUrl        String?
   branch         String?
@@ -349,6 +375,36 @@ model Service {
 
   @@unique([projectId, name])
   @@index([organizationId])
+}
+
+// Transactional outbox (RULE 23): written in the SAME transaction as the
+// state change it mirrors; the outbox worker publishes to the queue and marks
+// published. Guarantees DB state and events cannot diverge.
+model OutboxEvent {
+  id          String   @id @default(cuid())
+  aggregate   String
+  aggregateId String
+  eventType   String
+  payload     Json
+  publishedAt DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([publishedAt, createdAt])
+}
+
+// Idempotency keys (RULE 21): same key + same operation = same result.
+// Stored per organization so keys are unique within a tenant scope.
+model IdempotencyKey {
+  id             String   @id @default(cuid())
+  organizationId String
+  key            String
+  endpoint       String
+  responseBody   Json?
+  status         String   @default("PENDING") // PENDING | COMPLETED | FAILED
+  createdAt      DateTime @default(now())
+
+  @@unique([organizationId, key, endpoint])
+  @@index([organizationId, createdAt])
 }
 
 model EnvVar {

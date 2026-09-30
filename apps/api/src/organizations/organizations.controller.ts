@@ -1,10 +1,12 @@
-import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { OrganizationsService } from './organizations.service.js';
 import { CreateOrganizationDto } from './dto/create-organization.dto.js';
+import { UpdateOrganizationDto, UpdateMemberRoleDto } from './dto/organization.dto.js';
 import { SessionGuard } from '../auth/guards/session.guard.js';
 import { EmailVerifiedGuard } from '../auth/guards/email-verified.guard.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import type { CurrentUser as CurrentUserType } from '../auth/decorators/current-user.decorator.js';
+import { OrgRole } from '@myplatform/database';
 
 @UseGuards(SessionGuard, EmailVerifiedGuard)
 @Controller('organizations')
@@ -29,6 +31,15 @@ export class OrganizationsController {
     return this.organizations.findOneBySlug(slug);
   }
 
+  @Patch(':organizationId')
+  update(
+    @Param('organizationId') organizationId: string,
+    @Body() dto: UpdateOrganizationDto,
+    @CurrentUser() user: CurrentUserType,
+  ) {
+    return this.organizations.update(organizationId, user.id, dto);
+  }
+
   @Post(':organizationId/members')
   addMember(
     @Param('organizationId') organizationId: string,
@@ -39,7 +50,22 @@ export class OrganizationsController {
       organizationId,
       user.id,
       dto.email,
-      dto.role as any,
+      dto.role as OrgRole,
+    );
+  }
+
+  @Patch(':organizationId/members/:userId')
+  updateMemberRole(
+    @Param('organizationId') organizationId: string,
+    @Param('userId') targetUserId: string,
+    @Body() dto: UpdateMemberRoleDto,
+    @CurrentUser() user: CurrentUserType,
+  ) {
+    return this.organizations.updateMemberRole(
+      organizationId,
+      user.id,
+      targetUserId,
+      dto.role,
     );
   }
 

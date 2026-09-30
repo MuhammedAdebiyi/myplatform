@@ -5,22 +5,11 @@ import {
 } from '@nestjs/common';
 import { prisma, ActorType } from '@myplatform/database';
 import { generateApiKey } from '@myplatform/auth';
-import { Permission } from '../rbac/permissions.js';
+import { Permission, API_KEY_PERMISSIONS } from '../rbac/permissions.js';
 import { AuditService } from '../audit/audit.service.js';
 import { paginateQuery, parseLimit } from '../common/pagination.js';
 
-const MAX_PERMISSIONS_PER_KEY: Permission[] = [
-  Permission.PROJECT_READ,
-  Permission.PROJECT_CREATE,
-  Permission.PROJECT_UPDATE,
-  Permission.PROJECT_DELETE,
-  Permission.SERVICE_READ,
-  Permission.SERVICE_CREATE,
-  Permission.SERVICE_UPDATE,
-  Permission.SERVICE_DELETE,
-  Permission.MEMBER_LIST,
-  Permission.AUDIT_READ,
-];
+const MAX_PERMISSIONS_PER_KEY: Permission[] = API_KEY_PERMISSIONS;
 
 @Injectable()
 export class ApiKeysService {
