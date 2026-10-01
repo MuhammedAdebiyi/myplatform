@@ -14,7 +14,10 @@ import {
 import { createGunzip } from 'node:zlib';
 import { createReadStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
-import tar from 'tar';
+// tar v7 is dual ESM/CJS with NO default export — a default import resolves
+// to undefined under tsx and 'tar.x' throws "Cannot read properties of
+// undefined (reading 'x')" (found on the first real build, RULE 31).
+import * as tar from 'tar';
 
 const execFileAsync = promisify(execFile);
 
