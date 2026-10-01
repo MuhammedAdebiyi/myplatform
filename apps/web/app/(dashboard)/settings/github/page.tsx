@@ -59,8 +59,13 @@ function GitHubSettingsInner() {
           `/api/proxy/organizations/${activeOrg.id}/github/repositories`,
         );
         if (reposRes.ok) {
-          const reposData = await reposRes.json();
-          setRepos(reposData.items ?? reposData ?? []);
+          const reposData = await reposRes.json().catch(() => ({}));
+          const list: Repo[] = Array.isArray(reposData)
+            ? reposData
+            : Array.isArray(reposData?.items)
+              ? reposData.items
+              : [];
+          setRepos(list);
         }
       }
     } catch {

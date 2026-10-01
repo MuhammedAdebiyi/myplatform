@@ -360,14 +360,29 @@ function ServiceSettings({
   const [branchError, setBranchError] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState(service.branch ?? "");
   const [connectError, setConnectError] = useState("");
+  const [reposError, setReposError] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [connected, setConnected] = useState(!!service.githubRepositoryId);
 
   async function loadRepos() {
     if (reposLoaded) return;
     const res = await fetch(`/api/proxy/organizations/${orgId}/github/repositories`);
-    const data = await res.json();
-    setRepos(data.items ?? data ?? []);
+    const data = await res.json().catch(() => ({}));
+    // The proxy returns either an array, {items:[...]}, or an error object —
+    // only ever put a real array into state.
+    const list: Repo[] = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.items)
+        ? data.items
+        : [];
+    setRepos(list);
+    setReposError(
+      res.ok
+        ? list.length === 0
+          ? "No repositories available. Install the GitHub App first (Settings → GitHub)."
+          : ""
+        : data.message || "Could not load repositories.",
+    );
     setReposLoaded(true);
   }
 
@@ -385,7 +400,12 @@ function ServiceSettings({
       );
       if (!res.ok) throw new Error();
       const data = await res.json();
-      setBranches(data.items ?? data ?? []);
+      const list: { name: string; isDefault: boolean }[] = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.items)
+          ? data.items
+          : [];
+      setBranches(list);
     } catch {
       setBranchError(true);
       setBranches([]);
@@ -508,6 +528,9 @@ function ServiceSettings({
                   </button>
                   {connectError && (
                     <span className="ml-3 text-xs text-[var(--failed)]">{connectError}</span>
+                  )}
+                  {reposError && (
+                    <p className="mt-2 text-xs text-[var(--failed)]">{reposError}</p>
                   )}
                 </div>
               </form>
