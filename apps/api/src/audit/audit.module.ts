@@ -1,13 +1,15 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { AuditService } from './audit.service.js';
-import { AuditController } from './audit.controller.js';
-import { AuthModule } from '../auth/auth.module.js';
-import { ApiKeysModule } from '../api-keys/api-keys.module.js';
-import { RbacModule } from '../rbac/rbac.module.js';
 
+/**
+ * Audit service only — zero imports, so nothing that needs AuditService can
+ * form a module cycle with it. The audit-log READ endpoint lives in
+ * AuditAccessModule (it needs SessionGuard from AuthModule, which imports
+ * AuditModule — keeping them in one module created an Auth ⇄ Audit cycle
+ * that resolved SessionGuard with an undefined AuthService and 500'd every
+ * authenticated request (RULE 31: found by runtime smoke test, not tests).
+ */
 @Module({
-  imports: [AuthModule, forwardRef(() => ApiKeysModule), RbacModule],
-  controllers: [AuditController],
   providers: [AuditService],
   exports: [AuditService],
 })
