@@ -56,8 +56,14 @@ export default function ProjectsPage() {
 
   if (!activeOrg) {
     return (
-      <div className="text-center py-20 text-[var(--dim)]">
-        Select an organization to view projects.
+      <div className="py-20 text-center">
+        <p className="text-sm text-[var(--dim)]">You're not part of an organization yet.</p>
+        <Link
+          href="/organizations/new"
+          className="mt-4 inline-block rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-contrast)] transition-opacity hover:opacity-90"
+        >
+          + Create your first organization
+        </Link>
       </div>
     );
   }

@@ -55,9 +55,17 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        {/* Org switcher at bottom */}
-        {activeOrg && (
-          <div className="border-t border-[var(--border)] p-3">
+        {/* Org switcher at bottom — always rendered so first-time users can create an org */}
+        <div className="border-t border-[var(--border)] p-3">
+          {!activeOrg ? (
+            <Link
+              href="/organizations/new"
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-[var(--border)] px-3 py-2.5 text-sm font-medium text-[var(--dim)] transition-colors hover:border-[var(--accent)] hover:text-[var(--ink)]"
+            >
+              + Create your first organization
+            </Link>
+          ) : (
+            <>
             <button
               onClick={() => setOrgOpen(!orgOpen)}
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--hover)]"
@@ -100,8 +108,9 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                 </Link>
               </div>
             )}
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </aside>
 
       {/* Main area */}
