@@ -298,11 +298,21 @@ export class GitHubService {
   }
 
   async listRepositories(organizationId: string) {
+    // Select only JSON-safe columns: githubRepoId is a BigInt in the DB and
+    // JSON.stringify throws on BigInt, which 500'd this endpoint the moment a
+    // real installation had synced repos (found via live install, RULE 31).
     return prisma.gitHubRepository.findMany({
       where: {
         installation: { organizationId },
       },
-      include: { installation: { select: { accountLogin: true } } },
+      select: {
+        id: true,
+        name: true,
+        fullName: true,
+        private: true,
+        defaultBranch: true,
+        installation: { select: { accountLogin: true } },
+      },
       orderBy: { fullName: 'asc' },
     });
   }
