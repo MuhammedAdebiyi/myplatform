@@ -11,6 +11,7 @@ import { ServicesModule } from './services/services.module.js';
 import { UsersModule } from './users/users.module.js';
 import { GitHubModule } from './github/github.module.js';
 import { DeploymentsModule } from './deployments/deployments.module.js';
+import { AuditAccessModule } from './audit/audit-access.module.js';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { DeploymentsModule } from './deployments/deployments.module.js';
     UsersModule,
     GitHubModule,
     DeploymentsModule,
+    AuditAccessModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
