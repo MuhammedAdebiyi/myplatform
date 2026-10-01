@@ -20,6 +20,7 @@ type Deployment = {
   id: string;
   status: string;
   commitSha?: string;
+  imageDigest?: string;
   buildLog?: string;
   createdAt: string;
 };
@@ -213,43 +214,157 @@ function DeployLog({ orgId, projectId, serviceId }: { orgId: string; projectId: 
           {deployError}
         </div>
       )}
-      {latest ? (
-        <div className="rounded-lg border border-[var(--border)] overflow-hidden">
-          {/* Deploy header */}
-          <div className="flex items-center justify-between border-b border-[var(--border)] bg-[var(--bg-subtle)] px-5 py-3">
-            <div className="flex items-center gap-3">
-              <span className={`h-2 w-2 rounded-full ${STATUS_COLORS[latest.status] || "bg-[var(--dim)]"}`} />
-              <span className="text-sm font-medium text-[var(--ink)]">
-                {STATUS_LABELS[latest.status] || latest.status}
-              </span>
-              {latest.commitSha && (
-                <span className="font-mono text-xs text-[var(--dim)]">
-                  {latest.commitSha.slice(0, 7)}
-                </span>
-              )}
-            </div>
-            <span className="text-xs text-[var(--dim)]">
-              {new Date(latest.createdAt).toLocaleString()}
-            </span>
-          </div>
-
-          {/* Build log */}
-          {latest.buildLog ? (
-            <div className="bg-[var(--bg-subtle)] p-5 font-mono text-xs leading-[2.1] text-[var(--ink)] overflow-x-auto max-h-[400px] overflow-y-auto">
-              {latest.buildLog.split("\n").map((line, i) => (
-                <div key={i} className="whitespace-pre">{line}</div>
-              ))}
-            </div>
-          ) : (
-            <div className="p-8 text-center text-sm text-[var(--dim)]">
-              {latest.status === "BUILDING" ? "Build in progress..." : "No build log available."}
-            </div>
-          )}
+      {deployments.length > 0 ? (
+        <div className="rounded-lg border border-[var(--border)]">
+          {deployments.map((d, i) => (
+            <DeploymentRow
+              key={d.id}
+              deployment={d}
+              orgId={orgId}
+              projectId={projectId}
+              serviceId={serviceId}
+              isFirst={i === 0}
+              onRefresh={fetchDeployments}
+            />
+          ))}
         </div>
       ) : (
         <div className="rounded-lg border border-[var(--border)] py-16 text-center">
           <p className="text-sm text-[var(--dim)]">No deployments yet.</p>
-          <p className="mt-1 text-xs text-[var(--dim)]">Deployments are created automatically when you push to the connected repo.</p>
+          <p className="mt-1 text-xs text-[var(--dim)]">Deployments are created automatically when you push to the connected repo, or click Deploy above.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Single deployment row (expandable) ─── */
+function DeploymentRow({
+  deployment,
+  orgId,
+  projectId,
+  serviceId,
+  isFirst,
+  onRefresh,
+}: {
+  deployment: Deployment;
+  orgId: string;
+  projectId: string;
+  serviceId: string;
+  isFirst: boolean;
+  onRefresh: () => void;
+}) {
+  const [open, setOpen] = useState(isFirst);
+  const [buildLog, setBuildLog] = useState<string | null>(deployment.buildLog ?? null);
+  const [logLoaded, setLogLoaded] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const isActive = ["PENDING", "BUILDING", "DEPLOYING"].includes(deployment.status);
+
+  const loadLog = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/proxy/organizations/${orgId}/projects/${projectId}/services/${serviceId}/deployments/${deployment.id}`,
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setBuildLog(data.buildLog ?? null);
+      }
+    } catch {
+      // keep whatever we have
+    } finally {
+      setLogLoaded(true);
+    }
+  }, [orgId, projectId, serviceId, deployment.id]);
+
+  useEffect(() => {
+    if (open && !logLoaded) loadLog();
+  }, [open, logLoaded, loadLog]);
+
+  // Refresh the log while the deployment is active and expanded.
+  useEffect(() => {
+    if (!open || !isActive) return;
+    const interval = setInterval(loadLog, 3000);
+    return () => clearInterval(interval);
+  }, [open, isActive, loadLog]);
+
+  async function cancel() {
+    setCancelling(true);
+    try {
+      await fetch(
+        `/api/proxy/organizations/${orgId}/projects/${projectId}/services/${serviceId}/deployments/${deployment.id}/cancel`,
+        { method: "POST" },
+      );
+      onRefresh();
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  return (
+    <div className={isFirst ? "" : "border-t border-[var(--border)]"}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center justify-between px-5 py-3.5 text-left transition-colors hover:bg-[var(--hover)]"
+      >
+        <div className="flex items-center gap-3">
+          <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_COLORS[deployment.status] || "bg-[var(--dim)]"}`} />
+          <span className="text-sm font-medium text-[var(--ink)]">
+            {STATUS_LABELS[deployment.status] || deployment.status}
+          </span>
+          {deployment.commitSha && (
+            <span className="font-mono text-xs text-[var(--dim)]">{deployment.commitSha.slice(0, 7)}</span>
+          )}
+          {deployment.imageDigest && (
+            <span className="hidden font-mono text-xs text-[var(--dim)] sm:inline">{deployment.imageDigest.slice(0, 19)}</span>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          {isActive && (
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => {
+                e.stopPropagation();
+                cancel();
+              }}
+              onKeyDown={(e) => e.key === "Enter" && cancel()}
+              className="text-xs font-medium text-[var(--dim)] hover:text-[var(--failed)]"
+            >
+              {cancelling ? "Cancelling…" : "Cancel"}
+            </span>
+          )}
+          <span className="text-xs text-[var(--dim)]">{new Date(deployment.createdAt).toLocaleString()}</span>
+          <svg
+            className={`h-3.5 w-3.5 text-[var(--dim)] transition-transform ${open ? "rotate-180" : ""}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+          </svg>
+        </div>
+      </button>
+
+      {open && (
+        <div className="border-t border-[var(--border)] bg-[var(--bg-subtle)]">
+          {buildLog ? (
+            <div className="max-h-[420px] overflow-auto p-5 font-mono text-xs leading-[2.1] text-[var(--ink)]">
+              {buildLog.split("\n").map((line, i) => (
+                <div key={i} className="whitespace-pre-wrap">{line}</div>
+              ))}
+            </div>
+          ) : (
+            <div className="px-5 py-8 text-center text-sm text-[var(--dim)]">
+              {deployment.status === "PENDING"
+                ? "Waiting for a build worker to claim this deployment…"
+                : deployment.status === "BUILDING"
+                  ? "Build in progress…"
+                  : deployment.status === "DEPLOYING"
+                    ? "Deploying container…"
+                    : "No build log available."}
+            </div>
+          )}
         </div>
       )}
     </div>
