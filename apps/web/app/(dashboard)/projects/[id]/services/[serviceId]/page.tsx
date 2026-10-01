@@ -12,6 +12,8 @@ type Service = {
   repoUrl?: string;
   branch?: string;
   image?: string;
+  githubRepositoryId?: string;
+  deployPullRequests?: boolean;
 };
 
 type Deployment = {
@@ -341,13 +343,25 @@ function EnvVars({ orgId, projectId, serviceId }: { orgId: string; projectId: st
 }
 
 /* ─── Settings Tab ─── */
-function ServiceSettings({ orgId, serviceId, service }: { orgId: string; serviceId: string; service: Service }) {
+function ServiceSettings({
+  orgId,
+  serviceId,
+  service,
+}: {
+  orgId: string;
+  serviceId: string;
+  service: Service;
+}) {
   const [repos, setRepos] = useState<Repo[]>([]);
   const [reposLoaded, setReposLoaded] = useState(false);
-  const [selectedRepo, setSelectedRepo] = useState("");
-  const [selectedBranch, setSelectedBranch] = useState("");
+  const [selectedRepo, setSelectedRepo] = useState(service.githubRepositoryId ?? "");
+  const [branches, setBranches] = useState<{ name: string; isDefault: boolean }[]>([]);
+  const [loadingBranches, setLoadingBranches] = useState(false);
+  const [branchError, setBranchError] = useState(false);
+  const [selectedBranch, setSelectedBranch] = useState(service.branch ?? "");
+  const [connectError, setConnectError] = useState("");
   const [connecting, setConnecting] = useState(false);
-  const [connected, setConnected] = useState(!!service.repoUrl);
+  const [connected, setConnected] = useState(!!service.githubRepositoryId);
 
   async function loadRepos() {
     if (reposLoaded) return;
@@ -357,8 +371,32 @@ function ServiceSettings({ orgId, serviceId, service }: { orgId: string; service
     setReposLoaded(true);
   }
 
+  // Load live branches from GitHub whenever the repo selection changes.
+  async function loadBranches(repoId: string) {
+    if (!repoId) {
+      setBranches([]);
+      return;
+    }
+    setLoadingBranches(true);
+    setBranchError(false);
+    try {
+      const res = await fetch(
+        `/api/proxy/organizations/${orgId}/github/repositories/${repoId}/branches`,
+      );
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setBranches(data.items ?? data ?? []);
+    } catch {
+      setBranchError(true);
+      setBranches([]);
+    } finally {
+      setLoadingBranches(false);
+    }
+  }
+
   async function connectRepo(e: React.FormEvent) {
     e.preventDefault();
+    setConnectError("");
     setConnecting(true);
     try {
       const res = await fetch(`/api/proxy/organizations/${orgId}/github/services/${serviceId}/connect`, {
@@ -366,7 +404,12 @@ function ServiceSettings({ orgId, serviceId, service }: { orgId: string; service
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ githubRepositoryId: selectedRepo, branch: selectedBranch }),
       });
-      if (res.ok) setConnected(true);
+      if (res.ok) {
+        setConnected(true);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setConnectError(data.message || "Could not connect the repository.");
+      }
     } finally {
       setConnecting(false);
     }
@@ -388,6 +431,15 @@ function ServiceSettings({ orgId, serviceId, service }: { orgId: string; service
             {service.repoUrl && (
               <p className="mt-1 font-mono text-xs text-[var(--dim)]">{service.repoUrl} ({service.branch})</p>
             )}
+            <button
+              onClick={() => {
+                setConnected(false);
+                setReposLoaded(false);
+              }}
+              className="mt-2 text-xs font-medium text-[var(--dim)] hover:text-[var(--ink)]"
+            >
+              Change repository or branch
+            </button>
           </div>
         ) : (
           <div className="mt-2">
@@ -405,7 +457,11 @@ function ServiceSettings({ orgId, serviceId, service }: { orgId: string; service
                     <label className="mb-1 block text-xs font-medium text-[var(--dim)]">Repository</label>
                     <select
                       value={selectedRepo}
-                      onChange={(e) => setSelectedRepo(e.target.value)}
+                      onChange={(e) => {
+                        setSelectedRepo(e.target.value);
+                        setSelectedBranch("");
+                        loadBranches(e.target.value);
+                      }}
                       className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--ink)]"
                     >
                       <option value="">Select repo...</option>
@@ -416,12 +472,30 @@ function ServiceSettings({ orgId, serviceId, service }: { orgId: string; service
                   </div>
                   <div>
                     <label className="mb-1 block text-xs font-medium text-[var(--dim)]">Branch</label>
-                    <input
+                    <select
                       value={selectedBranch}
                       onChange={(e) => setSelectedBranch(e.target.value)}
-                      className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--ink)]"
-                      placeholder="main"
-                    />
+                      disabled={!selectedRepo || loadingBranches}
+                      className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--ink)] disabled:opacity-50"
+                    >
+                      <option value="">
+                        {!selectedRepo
+                          ? "Pick a repo first..."
+                          : loadingBranches
+                            ? "Loading branches..."
+                            : "Select branch..."}
+                      </option>
+                      {branches.map((b) => (
+                        <option key={b.name} value={b.name}>
+                          {b.name}{b.isDefault ? " (default)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                    {branchError && (
+                      <p className="mt-1 text-xs text-[var(--failed)]">
+                        Could not load branches — check the GitHub App installation.
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div className="mt-3">
@@ -432,6 +506,9 @@ function ServiceSettings({ orgId, serviceId, service }: { orgId: string; service
                   >
                     {connecting ? "Connecting..." : "Connect"}
                   </button>
+                  {connectError && (
+                    <span className="ml-3 text-xs text-[var(--failed)]">{connectError}</span>
+                  )}
                 </div>
               </form>
             )}

@@ -172,6 +172,7 @@ export class ServicesService {
         repoUrl: true,
         branch: true,
         githubRepositoryId: true,
+        deployPullRequests: true,
         dockerfilePath: true,
         buildCommand: true,
         startCommand: true,

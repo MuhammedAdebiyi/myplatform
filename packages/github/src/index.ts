@@ -154,6 +154,46 @@ export async function listInstallationRepos(
   return response.json() as Promise<GitHubInstallationReposResponse>;
 }
 
+/**
+ * List branches of an installation-accessible repository.
+ * Used by the connect-service UI to populate the branch picker.
+ */
+export interface GitHubBranch {
+  name: string;
+  commit: { sha: string };
+  protected: boolean;
+}
+
+export async function listBranches(
+  installationToken: string,
+  fullName: string,
+): Promise<GitHubBranch[]> {
+  const branches: GitHubBranch[] = [];
+  let page = 1;
+  // Cap at 30 pages (3000 branches) — beyond that the picker is unusable anyway.
+  while (page <= 30) {
+    const response = await fetch(
+      `https://api.github.com/repos/${fullName}/branches?per_page=100&page=${page}`,
+      {
+        headers: {
+          Authorization: `Bearer ${installationToken}`,
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
+      },
+    );
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`GitHub list branches failed (${response.status}): ${body}`);
+    }
+    const batch = (await response.json()) as GitHubBranch[];
+    branches.push(...batch);
+    if (batch.length < 100) break;
+    page += 1;
+  }
+  return branches;
+}
+
 // ─── Repo archive download ──────────────────────────────
 
 /**

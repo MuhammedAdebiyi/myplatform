@@ -348,6 +348,8 @@ model Service {
 
   repoUrl        String?
   branch         String?
+  // PR preview deployments (push events always deploy; PRs are opt-in)
+  deployPullRequests Boolean @default(false)
   githubRepositoryId String?
   githubRepository   GitHubRepository? @relation(fields: [githubRepositoryId], references: [id])
   dockerfilePath String?
