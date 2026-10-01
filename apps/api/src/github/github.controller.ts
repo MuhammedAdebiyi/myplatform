@@ -21,6 +21,9 @@ import { GetOrganizationId } from '../rbac/decorators/get-organization-id.decora
 import { Permission } from '../rbac/permissions.js';
 import { WebhookGuard } from './guards/webhook.guard.js';
 import { ConnectServiceDto } from './dto/connect-service.dto.js';
+import { CompleteInstallationDto } from './dto/complete-installation.dto.js';
+import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import type { CurrentUser as CurrentUserType } from '../auth/decorators/current-user.decorator.js';
 
 @Controller()
 export class GitHubController {
@@ -47,6 +50,24 @@ export class GitHubController {
   @Get('organizations/:organizationId/github/install-url')
   async installUrl(@GetOrganizationId() organizationId: string) {
     return this.githubService.createInstallUrl(organizationId);
+  }
+
+  /**
+   * Complete an installation identified by its state (not by an org path
+   * param). Authenticated so only a logged-in member of the org that started
+   * the install can finalize it.
+   */
+  @UseGuards(SessionGuard)
+  @Post('github/installations/complete')
+  async completeInstallation(
+    @Body() dto: CompleteInstallationDto,
+    @CurrentUser() user: CurrentUserType,
+  ) {
+    return this.githubService.completeInstallation(
+      dto.state,
+      dto.installationId,
+      user.id,
+    );
   }
 
   @UseGuards(SessionGuard, EmailVerifiedGuard, ApiKeyGuard, OrganizationGuard)
@@ -76,6 +97,32 @@ export class GitHubController {
       res.redirect(`${process.env.APP_URL}/settings/github?success=true`);
     } catch {
       res.redirect(`${process.env.APP_URL}/settings/github?error=installation_failed`);
+    }
+  }
+
+  /**
+   * Static GitHub App Setup URL target. GitHub redirects here after
+   * installation with ?installation_id & ?state — no org in the path, so we
+   * resolve the organization from the state ourselves and bounce to the
+   * org-scoped callback. Public: the state is the proof of intent.
+   */
+  @Get('github/setup')
+  async setup(
+    @Query('installation_id') installationId: string,
+    @Query('setup_action') setupAction: string,
+    @Query('state') state: string,
+    @Res() res: any,
+  ) {
+    const webUrl = process.env.APP_URL;
+    if (!installationId || !state) {
+      return res.redirect(`${webUrl}/settings/github?error=missing_params`);
+    }
+    try {
+      const organizationId = await this.githubService.resolveOrganizationByState(state);
+      const target = `${webUrl}/settings/github/callback?installation_id=${encodeURIComponent(installationId)}&setup_action=${encodeURIComponent(setupAction ?? 'install')}&state=${encodeURIComponent(state)}`;
+      return res.redirect(target);
+    } catch {
+      return res.redirect(`${webUrl}/settings/github?error=invalid_state`);
     }
   }
 
