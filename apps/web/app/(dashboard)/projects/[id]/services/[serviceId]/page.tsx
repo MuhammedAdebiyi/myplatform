@@ -124,23 +124,53 @@ export default function ServiceDetailPage({
 function DeployLog({ orgId, projectId, serviceId }: { orgId: string; projectId: string; serviceId: string }) {
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deploying, setDeploying] = useState(false);
+  const [deployError, setDeployError] = useState("");
 
   const fetchDeployments = useCallback(async () => {
     if (!orgId) return;
     try {
-      const res = await fetch(`/api/proxy/organizations/${orgId}/projects/${projectId}/services/${serviceId}`);
-      const svc = await res.json();
-      // The service endpoint might include deployments, or we need a separate call
-      // For now, let's check if there's a deployments endpoint
-      // Based on the API analysis, there's no standalone deployments list endpoint
-      // Deployments are likely nested in the service response
-      setDeployments(svc.deployments ?? []);
+      const res = await fetch(`/api/proxy/organizations/${orgId}/projects/${projectId}/services/${serviceId}/deployments`);
+      if (res.ok) {
+        const data = await res.json();
+        const list: Deployment[] = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.items)
+            ? data.items
+            : [];
+        setDeployments(list);
+      }
     } catch {
       // ignore
     } finally {
       setLoading(false);
     }
   }, [orgId, projectId, serviceId]);
+
+  async function triggerDeploy() {
+    setDeployError("");
+    setDeploying(true);
+    try {
+      const res = await fetch(
+        `/api/proxy/organizations/${orgId}/projects/${projectId}/services/${serviceId}/deployments`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        },
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setDeployError(data.message || "Could not start the deployment.");
+        return;
+      }
+      await fetchDeployments();
+    } catch {
+      setDeployError("Network error while starting the deployment.");
+    } finally {
+      setDeploying(false);
+    }
+  }
 
   useEffect(() => {
     fetchDeployments();
@@ -163,6 +193,26 @@ function DeployLog({ orgId, projectId, serviceId }: { orgId: string; projectId: 
 
   return (
     <div>
+      <div className="mb-4 flex items-center justify-between">
+        <p className="text-xs text-[var(--dim)]">
+          Deploys run automatically on push to the connected branch, or start one manually:
+        </p>
+        <button
+          onClick={triggerDeploy}
+          disabled={
+            deploying ||
+            deployments.some((d) => ["PENDING", "BUILDING", "DEPLOYING"].includes(d.status))
+          }
+          className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-contrast)] transition-opacity hover:opacity-90 disabled:opacity-50"
+        >
+          {deploying ? "Starting…" : "Deploy"}
+        </button>
+      </div>
+      {deployError && (
+        <div className="mb-4 rounded-lg border border-[var(--failed)]/30 bg-[var(--failed)]/5 px-4 py-3 text-sm text-[var(--failed)]">
+          {deployError}
+        </div>
+      )}
       {latest ? (
         <div className="rounded-lg border border-[var(--border)] overflow-hidden">
           {/* Deploy header */}
