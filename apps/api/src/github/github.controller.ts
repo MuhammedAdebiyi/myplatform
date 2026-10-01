@@ -37,6 +37,18 @@ export class GitHubController {
     res.redirect(url);
   }
 
+  /**
+   * JSON variant for the web app: the proxy speaks JSON, so the browser
+   * fetches the URL and navigates itself. (The redirect variant above is
+   * for direct browser navigation.)
+   */
+  @UseGuards(SessionGuard, EmailVerifiedGuard, ApiKeyGuard, OrganizationGuard)
+  @RequirePermissions(Permission.SERVICE_UPDATE)
+  @Get('organizations/:organizationId/github/install-url')
+  async installUrl(@GetOrganizationId() organizationId: string) {
+    return this.githubService.createInstallUrl(organizationId);
+  }
+
   @UseGuards(SessionGuard, EmailVerifiedGuard, ApiKeyGuard, OrganizationGuard)
   @RequirePermissions(Permission.SERVICE_UPDATE)
   @Get('organizations/:organizationId/github/callback')
@@ -90,6 +102,9 @@ export class GitHubController {
       case 'installation_repositories':
         await this.githubService.handleInstallationReposEvent(payload);
         break;
+      case 'pull_request':
+        await this.githubService.handlePullRequestEvent(payload);
+        break;
       case 'push':
         await this.githubService.handlePushEvent(payload);
         break;
@@ -102,11 +117,30 @@ export class GitHubController {
 
   @UseGuards(SessionGuard, EmailVerifiedGuard, ApiKeyGuard, OrganizationGuard)
   @RequirePermissions(Permission.SERVICE_READ)
+  @Get('organizations/:organizationId/github/installation')
+  async installationStatus(
+    @GetOrganizationId() organizationId: string,
+  ) {
+    return this.githubService.getInstallationStatus(organizationId);
+  }
+
+  @UseGuards(SessionGuard, EmailVerifiedGuard, ApiKeyGuard, OrganizationGuard)
+  @RequirePermissions(Permission.SERVICE_READ)
   @Get('organizations/:organizationId/github/repositories')
   async listRepositories(
     @GetOrganizationId() organizationId: string,
   ) {
     return this.githubService.listRepositories(organizationId);
+  }
+
+  @UseGuards(SessionGuard, EmailVerifiedGuard, ApiKeyGuard, OrganizationGuard)
+  @RequirePermissions(Permission.SERVICE_READ)
+  @Get('organizations/:organizationId/github/repositories/:repoId/branches')
+  async listBranches(
+    @GetOrganizationId() organizationId: string,
+    @Param('repoId') repoId: string,
+  ) {
+    return this.githubService.listRepoBranches(organizationId, repoId);
   }
 
   @UseGuards(SessionGuard, EmailVerifiedGuard, ApiKeyGuard, OrganizationGuard)

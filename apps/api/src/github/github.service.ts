@@ -4,6 +4,7 @@ import {
   generateAppJwt,
   getInstallationInfo,
   listInstallationRepos,
+  listBranches,
   createInstallationAccessToken,
   type GitHubAppConfig,
 } from '@myplatform/github';
@@ -29,6 +30,21 @@ interface InstallationReposEventPayload {
 interface PushEventPayload {
   ref: string;
   after: string;
+  deleted?: boolean;
+  created?: boolean;
+  forced?: boolean;
+  repository: { full_name: string };
+}
+
+interface PullRequestEventPayload {
+  action: 'opened' | 'synchronize' | 'reopened' | 'closed';
+  number: number;
+  pull_request: {
+    head: { sha: string; ref: string };
+    base: { ref: string };
+    merged: boolean;
+    draft: boolean;
+  };
   repository: { full_name: string };
 }
 
@@ -243,9 +259,133 @@ export class GitHubService {
       throw new NotFoundException(`Service ${serviceId} not found`);
     }
 
-    return prisma.service.update({
+    const updated = await prisma.service.update({
       where: { id: serviceId },
-      data: { githubRepositoryId, branch },
+      data: { githubRepositoryId, branch, repoUrl: `https://github.com/${repo.fullName}` },
+    });
+
+    this.audit.log({
+      organizationId,
+      actorType: ActorType.USER,
+      action: 'github.service.connect',
+      resourceType: 'Service',
+      resourceId: serviceId,
+      metadata: { repoFullName: repo.fullName, branch },
+    });
+
+    return updated;
+  }
+
+  /**
+   * Installation status for the settings UI: connected, account, repo count.
+   */
+  async getInstallationStatus(organizationId: string) {
+    const installation = await prisma.gitHubInstallation.findFirst({
+      where: { organizationId },
+      include: { repositories: { select: { id: true } } },
+    });
+    if (!installation) return { connected: false as const };
+    return {
+      connected: true as const,
+      installationId: installation.installationId,
+      accountLogin: installation.accountLogin,
+      accountType: installation.accountType,
+      suspended: installation.suspendedAt !== null,
+      repositoryCount: installation.repositories.length,
+    };
+  }
+
+  /**
+   * Live branches of a connected repo, fetched fresh from GitHub using the
+   * installation token. Default branch sorts first.
+   */
+  async listRepoBranches(organizationId: string, githubRepositoryId: string) {
+    const repo = await prisma.gitHubRepository.findFirst({
+      where: { id: githubRepositoryId, installation: { organizationId } },
+      include: { installation: { select: { installationId: true, suspendedAt: true } } },
+    });
+    if (!repo) {
+      throw new NotFoundException('GitHub repository not found for this organization');
+    }
+    if (repo.installation.suspendedAt) {
+      throw new UnauthorizedException('GitHub App installation is suspended');
+    }
+
+    const config = getGitHubAppConfig();
+    const appJwt = generateAppJwt(config);
+    const token = await createInstallationAccessToken(appJwt, repo.installation.installationId);
+    const branches = await listBranches(token.token, repo.fullName);
+
+    return branches
+      .sort((a, b) => {
+        if (a.name === repo.defaultBranch) return -1;
+        if (b.name === repo.defaultBranch) return 1;
+        return a.name.localeCompare(b.name);
+      })
+      .map((b) => ({ name: b.name, commitSha: b.commit.sha, isDefault: b.name === repo.defaultBranch }));
+  }
+
+  async handlePullRequestEvent(payload: PullRequestEventPayload) {
+    const pr = payload.pull_request;
+    // Draft PRs and non-code actions never deploy.
+    if (pr.draft) return;
+    if (!['opened', 'synchronize', 'reopened'].includes(payload.action)) return;
+
+    const repo = await prisma.gitHubRepository.findFirst({
+      where: { fullName: payload.repository.full_name },
+    });
+    if (!repo) return;
+
+    const services = await prisma.service.findMany({
+      where: { githubRepositoryId: repo.id, deployPullRequests: true, branch: pr.base.ref },
+    });
+
+    for (const service of services) {
+      await this.createPushDeployment(
+        service.id,
+        service.organizationId,
+        pr.head.sha,
+        `pr-${payload.number}`,
+      );
+    }
+  }
+
+  /**
+   * Shared deployment creation for push and PR events: Deployment row +
+   * outbox event in one transaction (RULE 23), then audit.
+   */
+  private async createPushDeployment(
+    serviceId: string,
+    organizationId: string,
+    commitSha: string,
+    branch: string,
+  ): Promise<void> {
+    const [, outboxEvent] = await prisma.$transaction(async (tx) => {
+      const deployment = await tx.deployment.create({
+        data: {
+          serviceId,
+          status: 'PENDING',
+          commitSha,
+        },
+      });
+      const event = await tx.outboxEvent.create({
+        data: {
+          aggregate: 'Deployment',
+          aggregateId: deployment.id,
+          eventType: 'deployment.created',
+          payload: { deploymentId: deployment.id, serviceId, commitSha },
+        },
+      });
+      return [deployment, event] as const;
+    });
+
+    this.audit.log({
+      organizationId,
+      actorType: ActorType.SYSTEM,
+      action: 'deployment.enqueue',
+      resourceType: 'Deployment',
+      resourceId: outboxEvent.aggregateId,
+      metadata: { serviceId, commitSha, branch, via: 'outbox' },
     });
   }
 
@@ -286,6 +426,13 @@ export class GitHubService {
       if (existing) {
         await prisma.gitHubInstallation.delete({ where: { installationId } });
       }
+    } else if (action === 'suspend' || action === 'unsuspend') {
+      const suspendedAt = action === 'suspend' ? new Date() : null;
+      await prisma.gitHubInstallation.updateMany({
+        where: { installationId },
+        data: { suspendedAt },
+      });
+      this.logger.log({ installationId, action }, 'Installation suspend state changed');
     }
   }
 
@@ -295,6 +442,12 @@ export class GitHubService {
   }
 
   async handlePushEvent(payload: PushEventPayload) {
+    // Branch deletion, tag pushes and empty pushes never deploy. A forced
+    // push DOES deploy (the new tip is real code) — but with the new sha.
+    if (payload.deleted) return;
+    if (!payload.ref?.startsWith('refs/heads/')) return;
+    if (!payload.after || payload.after === '0000000000000000000000000000000000000000') return;
+
     const repoFullName = payload.repository.full_name;
     const ref: string = payload.ref;
     const branch = ref.replace('refs/heads/', '');
@@ -302,9 +455,14 @@ export class GitHubService {
 
     const repo = await prisma.gitHubRepository.findFirst({
       where: { fullName: repoFullName },
+      include: { installation: { select: { suspendedAt: true } } },
     });
 
     if (!repo) return;
+    // Suspended installations must not trigger builds — GitHub stops sending
+    // webhooks on suspend, but in-flight/queued deliveries can still arrive.
+    // A repo with no resolvable installation is treated as suspended too.
+    if (repo.installation?.suspendedAt ?? true) return;
 
     const services = await prisma.service.findMany({
       where: {
@@ -314,36 +472,7 @@ export class GitHubService {
     });
 
     for (const service of services) {
-      // Outbox (RULE 23): deployment row + event commit together; the queue
-      // enqueue is done by the outbox pump, so a Redis blip between commit
-      // and add can no longer strand a push-triggered deployment.
-      const [, outboxEvent] = await prisma.$transaction(async (tx) => {
-        const deployment = await tx.deployment.create({
-          data: {
-            serviceId: service.id,
-            status: 'PENDING',
-            commitSha,
-          },
-        });
-        const event = await tx.outboxEvent.create({
-          data: {
-            aggregate: 'Deployment',
-            aggregateId: deployment.id,
-            eventType: 'deployment.created',
-            payload: { deploymentId: deployment.id, serviceId: service.id, commitSha },
-          },
-        });
-        return [deployment, event] as const;
-      });
-
-      this.audit.log({
-        organizationId: service.organizationId,
-        actorType: ActorType.SYSTEM,
-        action: 'deployment.enqueue',
-        resourceType: 'Deployment',
-        resourceId: outboxEvent.aggregateId,
-        metadata: { serviceId: service.id, commitSha, branch, via: 'outbox' },
-      });
+      await this.createPushDeployment(service.id, service.organizationId, commitSha, branch);
     }
   }
 }
