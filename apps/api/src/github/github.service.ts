@@ -79,6 +79,79 @@ export class GitHubService {
     return { url, state };
   }
 
+  /**
+   * Resolve which organization an InstallationState belongs to, WITHOUT
+   * consuming it. Used by the static GitHub App Setup URL (/github/setup),
+   * which cannot carry an organizationId in its path — the state does.
+   */
+  async resolveOrganizationByState(state: string): Promise<string> {
+    const installationState = await prisma.installationState.findUnique({
+      where: { state },
+      select: { organizationId: true, expiresAt: true },
+    });
+    if (!installationState || installationState.expiresAt < new Date()) {
+      throw new UnauthorizedException('Invalid or expired installation state');
+    }
+    return installationState.organizationId;
+  }
+
+  /**
+   * Complete an installation started via createInstallUrl, keyed by state
+   * instead of an org path param. Verifies the caller is a member of the org
+   * that started the install, then runs the same validate+upsert+sync as the
+   * browser callback.
+   */
+  async completeInstallation(
+    state: string,
+    installationId: number,
+    callerUserId: string,
+  ): Promise<{ organizationId: string; accountLogin: string }> {
+    const organizationId = await this.resolveOrganizationByState(state);
+
+    const membership = await prisma.membership.findUnique({
+      where: { userId_organizationId: { userId: callerUserId, organizationId } },
+      select: { id: true },
+    });
+    if (!membership) {
+      throw new UnauthorizedException('You are not a member of the organization that started this installation');
+    }
+
+    const config = getGitHubAppConfig();
+    const appJwt = generateAppJwt(config);
+    const installationInfo = await getInstallationInfo(appJwt, installationId);
+
+    await prisma.gitHubInstallation.upsert({
+      where: { installationId },
+      create: {
+        organizationId,
+        installationId,
+        accountLogin: installationInfo.account.login,
+        accountType: installationInfo.account.type,
+      },
+      update: {
+        organizationId,
+        accountLogin: installationInfo.account.login,
+        accountType: installationInfo.account.type,
+        suspendedAt: null,
+      },
+    });
+
+    await this.syncRepos(installationId);
+    await prisma.installationState.delete({ where: { state } });
+
+    this.audit.log({
+      organizationId,
+      actorType: ActorType.USER,
+      actorUserId: callerUserId,
+      action: 'github.installation.create',
+      resourceType: 'GitHubInstallation',
+      resourceId: undefined,
+      metadata: { installationId, accountLogin: installationInfo.account.login, via: 'setup-url' },
+    });
+
+    return { organizationId, accountLogin: installationInfo.account.login };
+  }
+
   async handleCallback(
     organizationId: string,
     installationId: number,
