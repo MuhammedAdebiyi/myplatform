@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, UnauthorizedException, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { prisma, ActorType } from '@myplatform/database';
 import {
   generateAppJwt,
@@ -356,6 +356,17 @@ export class GitHubService {
       metadata: { repoFullName: repo.fullName, branch },
     });
 
+    // Vercel-style auto-deploy: when enabled, connecting (or reconnecting)
+    // immediately kicks off a deploy of the new connection's default state.
+    // Best-effort: a failed deploy enqueue must NOT fail the connect itself.
+    if (updated.autoDeployOnConnect) {
+      try {
+        await this.createPushDeployment(serviceId, organizationId, null as unknown as string, branch);
+      } catch (err) {
+        this.logger.error({ err, serviceId }, 'Auto-deploy after connect failed to enqueue');
+      }
+    }
+
     return updated;
   }
 
@@ -408,6 +419,75 @@ export class GitHubService {
       .map((b) => ({ name: b.name, commitSha: b.commit.sha, isDefault: b.name === repo.defaultBranch }));
   }
 
+  /**
+   * Branch mappings for a service (Vercel-style): the production branch
+   * deploys to live domains; preview branches deploy off-production.
+   */
+  async listBranchMappings(organizationId: string, serviceId: string) {
+    await this.requireService(organizationId, serviceId);
+    return prisma.serviceBranchMapping.findMany({
+      where: { serviceId },
+      orderBy: [{ target: 'desc' }, { branch: 'asc' }],
+      select: { id: true, branch: true, target: true, createdAt: true },
+    });
+  }
+
+  /**
+   * Replace ALL mappings for a service in one transaction. Exactly one
+   * PRODUCTION mapping is enforced. Passing no production mapping means the
+   * service's connected branch stays implicit production (legacy compat).
+   */
+  async setBranchMappings(
+    organizationId: string,
+    serviceId: string,
+    mappings: Array<{ branch: string; target: 'PRODUCTION' | 'PREVIEW' }>,
+  ) {
+    const service = await this.requireService(organizationId, serviceId);
+
+    const productionCount = mappings.filter((m) => m.target === 'PRODUCTION').length;
+    if (productionCount > 1) {
+      throw new BadRequestException('Only one production branch mapping is allowed per service');
+    }
+
+    const branches = mappings.map((m) => m.branch);
+    if (new Set(branches).size !== branches.length) {
+      throw new BadRequestException('Duplicate branch in mappings');
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.serviceBranchMapping.deleteMany({ where: { serviceId } });
+      if (mappings.length) {
+        await tx.serviceBranchMapping.createMany({
+          data: mappings.map((m) => ({
+            serviceId,
+            branch: m.branch,
+            target: m.target,
+          })),
+        });
+      }
+    });
+
+    this.audit.log({
+      organizationId,
+      actorType: ActorType.USER,
+      action: 'github.service.branch_mappings.set',
+      resourceType: 'Service',
+      resourceId: serviceId,
+      metadata: { serviceName: service.name, mappings },
+    });
+
+    return this.listBranchMappings(organizationId, serviceId);
+  }
+
+  private async requireService(organizationId: string, serviceId: string) {
+    const service = await prisma.service.findFirst({
+      where: { id: serviceId, organizationId, lifecycle: 'ACTIVE' },
+      select: { id: true, name: true },
+    });
+    if (!service) throw new NotFoundException(`Service ${serviceId} not found`);
+    return service;
+  }
+
   async handlePullRequestEvent(payload: PullRequestEventPayload) {
     const pr = payload.pull_request;
     // Draft PRs and non-code actions never deploy.
@@ -429,6 +509,7 @@ export class GitHubService {
         service.organizationId,
         pr.head.sha,
         `pr-${payload.number}`,
+        'preview',
       );
     }
   }
@@ -436,19 +517,32 @@ export class GitHubService {
   /**
    * Shared deployment creation for push and PR events: Deployment row +
    * outbox event in one transaction (RULE 23), then audit.
+   * commitSha may be null (auto-deploy on connect builds HEAD).
+   * deploymentTarget distinguishes production vs preview (branch mappings).
    */
   private async createPushDeployment(
     serviceId: string,
     organizationId: string,
-    commitSha: string,
+    commitSha: string | null,
     branch: string,
+    deploymentTarget: 'production' | 'preview' = 'production',
   ): Promise<void> {
+    // Best-effort commit metadata (message + author) — a GitHub hiccup must
+    // never block a deploy, so failure just leaves the fields null.
+    const commitMeta = commitSha
+      ? await this.fetchCommitMeta(serviceId, commitSha).catch(() => null)
+      : null;
+
     const [, outboxEvent] = await prisma.$transaction(async (tx) => {
       const deployment = await tx.deployment.create({
         data: {
           serviceId,
           status: 'PENDING',
           commitSha,
+          commitMessage: commitMeta?.message ?? null,
+          commitAuthor: commitMeta?.author ?? null,
+          branch,
+          deploymentTarget,
         },
       });
       const event = await tx.outboxEvent.create({
@@ -468,8 +562,57 @@ export class GitHubService {
       action: 'deployment.enqueue',
       resourceType: 'Deployment',
       resourceId: outboxEvent.aggregateId,
-      metadata: { serviceId, commitSha, branch, via: 'outbox' },
+      metadata: { serviceId, commitSha, branch, deploymentTarget, via: 'outbox' },
     });
+  }
+
+  /**
+   * Fetch commit message + author login from GitHub for the deploy list.
+   * Uses the service's repo installation token; null on any failure.
+   */
+  private async fetchCommitMeta(
+    serviceId: string,
+    commitSha: string,
+  ): Promise<{ message: string; author: string } | null> {
+    try {
+      const service = await prisma.service.findUnique({
+        where: { id: serviceId },
+        select: {
+          githubRepository: {
+            select: { fullName: true, installation: { select: { installationId: true } } },
+          },
+        },
+      });
+      const repo = service?.githubRepository;
+      if (!repo) return null;
+
+      const config = getGitHubAppConfig();
+      const appJwt = generateAppJwt(config);
+      const token = await createInstallationAccessToken(appJwt, repo.installation.installationId);
+
+      const res = await fetch(
+        `https://api.github.com/repos/${repo.fullName}/commits/${commitSha}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token.token}`,
+            Accept: 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28',
+          },
+        },
+      );
+      if (!res.ok) return null;
+
+      const data = (await res.json()) as {
+        commit?: { message?: string };
+        author?: { login?: string } | null;
+      };
+      const message = data.commit?.message?.split('\n')[0]?.slice(0, 200) ?? null;
+      const author = data.author?.login ?? null;
+      if (!message && !author) return null;
+      return { message: message ?? '', author: author ?? '' };
+    } catch {
+      return null;
+    }
   }
 
   async handleInstallationEvent(payload: InstallationEventPayload) {
@@ -552,10 +695,30 @@ export class GitHubService {
         githubRepositoryId: repo.id,
         branch,
       },
+      include: { branchMappings: true },
     });
 
     for (const service of services) {
-      await this.createPushDeployment(service.id, service.organizationId, commitSha, branch);
+      // Branch-mapping routing (Vercel model): if the pushed branch has an
+      // explicit mapping it wins (production vs preview); otherwise the
+      // service's connected branch behaves as production (legacy compat) and
+      // any other branch is a preview deploy.
+      const mapping = service.branchMappings.find((m) => m.branch === branch);
+      const target: 'production' | 'preview' = mapping
+        ? mapping.target === 'PRODUCTION'
+          ? 'production'
+          : 'preview'
+        : service.branch === branch
+          ? 'production'
+          : 'preview';
+
+      await this.createPushDeployment(
+        service.id,
+        service.organizationId,
+        commitSha,
+        branch,
+        target,
+      );
     }
   }
 }

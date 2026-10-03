@@ -92,12 +92,18 @@ type Service = {
   image?: string;
   githubRepositoryId?: string;
   deployPullRequests?: boolean;
+  autoDeployOnConnect?: boolean;
+  branchMappings?: { id: string; branch: string; target: string }[];
 };
 
 type Deployment = {
   id: string;
   status: string;
   commitSha?: string;
+  commitMessage?: string;
+  commitAuthor?: string;
+  branch?: string;
+  deploymentTarget?: string;
   imageDigest?: string;
   buildLog?: string;
   createdAt: string;
@@ -248,6 +254,7 @@ export default function ServiceDetailPage({
         {tab === "settings" && (
           <ServiceSettings
             orgId={orgId}
+            projectId={id}
             serviceId={serviceId}
             service={service}
             onServiceChanged={fetchService}
@@ -413,8 +420,26 @@ function DeploymentRow({
               Current
             </span>
           )}
+          {deployment.deploymentTarget === "preview" && (
+            <span className="rounded-full border border-[var(--border)] bg-[var(--hover)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--dim)]">
+              Preview
+            </span>
+          )}
           {deployment.commitSha && (
             <span className="font-mono text-xs text-[var(--dim)]">{deployment.commitSha.slice(0, 7)}</span>
+          )}
+          {deployment.commitMessage && (
+            <span className="hidden max-w-[320px] truncate text-xs text-[var(--ink)] sm:inline">
+              {deployment.commitMessage}
+            </span>
+          )}
+          {deployment.commitAuthor && (
+            <span className="hidden text-xs text-[var(--dim)] md:inline">— {deployment.commitAuthor}</span>
+          )}
+          {deployment.branch && (
+            <span className="hidden rounded bg-[var(--hover)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--dim)] lg:inline">
+              {deployment.branch}
+            </span>
           )}
           {deployment.imageDigest && (
             <span className="hidden font-mono text-xs text-[var(--dim)] sm:inline">{deployment.imageDigest.slice(0, 19)}</span>
@@ -612,12 +637,14 @@ function EnvVars({ orgId, projectId, serviceId }: { orgId: string; projectId: st
 /* ─── Settings Tab ─── */
 function ServiceSettings({
   orgId,
+  projectId,
   serviceId,
   service,
   onServiceChanged,
   onTriggerDeploy,
 }: {
   orgId: string;
+  projectId: string;
   serviceId: string;
   service: Service;
   onServiceChanged: () => void;
@@ -719,6 +746,15 @@ function ServiceSettings({
       {/* GitHub connection */}
       <div>
         <h3 className="text-sm font-medium text-[var(--ink)]">GitHub Repository</h3>
+        {connected && (
+          <AutoDeployToggle
+            orgId={orgId}
+            projectId={projectId}
+            serviceId={serviceId}
+            initial={service.autoDeployOnConnect ?? false}
+            onSaved={onServiceChanged}
+          />
+        )}
         {connected ? (
           <div className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--bg-subtle)] px-4 py-3">
             <div className="flex items-center gap-2">
@@ -861,6 +897,9 @@ function ServiceSettings({
         )}
       </div>
 
+      {/* Branch mappings (Vercel-style production/preview) */}
+      {connected && <BranchMappings orgId={orgId} serviceId={serviceId} service={service} onChanged={onServiceChanged} />}
+
       {/* Service info */}
       <div>
         <h3 className="text-sm font-medium text-[var(--ink)]">Service Details</h3>
@@ -876,6 +915,179 @@ function ServiceSettings({
             </div>
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Auto-deploy toggle (Settings) ─── */
+function AutoDeployToggle({
+  orgId,
+  projectId,
+  serviceId,
+  initial,
+  onSaved,
+}: {
+  orgId: string;
+  projectId: string;
+  serviceId: string;
+  initial: boolean;
+  onSaved: () => void;
+}) {
+  const [enabled, setEnabled] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function save(next: boolean) {
+    setSaving(true);
+    setError("");
+    try {
+      const res = await fetch(
+        `/api/proxy/organizations/${orgId}/projects/${projectId}/services/${serviceId}/settings`,
+        { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ autoDeployOnConnect: next }) },
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.message || "Could not save the setting.");
+        setEnabled(!next);
+        return;
+      }
+      setEnabled(next);
+      onSaved();
+    } catch {
+      setError("Network error while saving.");
+      setEnabled(!next);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-3">
+      <label className="flex items-start gap-2.5">
+        <input
+          type="checkbox"
+          checked={enabled}
+          disabled={saving}
+          onChange={(e) => save(e.target.checked)}
+          className="mt-0.5 rounded"
+        />
+        <span className="text-xs text-[var(--dim)]">
+          <span className="font-medium text-[var(--ink)]">Automatically deploy after connection change</span> —
+          connecting a new repo or branch kicks off a deploy immediately.
+        </span>
+      </label>
+      {error && <p className="mt-1 text-xs text-[var(--failed)]">{error}</p>}
+    </div>
+  );
+}
+
+/* ─── Branch mappings (Settings) ─── */
+function BranchMappings({
+  orgId,
+  serviceId,
+  service,
+  onChanged,
+}: {
+  orgId: string;
+  serviceId: string;
+  service: Service;
+  onChanged: () => void;
+}) {
+  const mappings = service.branchMappings ?? [];
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [newBranch, setNewBranch] = useState("");
+
+  async function save(next: { branch: string; target: string }[]) {
+    setSaving(true);
+    setError("");
+    try {
+      const res = await fetch(
+        `/api/proxy/organizations/${orgId}/github/services/${serviceId}/branch-mappings`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mappings: next.map((m) => ({ branch: m.branch, target: m.target })) }),
+        },
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.message || "Could not save branch mappings.");
+        return;
+      }
+      onChanged();
+    } catch {
+      setError("Network error while saving branch mappings.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const productionBranch = mappings.find((m) => m.target === "PRODUCTION");
+
+  return (
+    <div>
+      <h3 className="text-sm font-medium text-[var(--ink)]">Branch Mappings</h3>
+      <p className="mt-1 text-xs text-[var(--dim)]">
+        The production branch deploys to your live domains. Any other mapped branch deploys as a
+        preview — its pushes never touch production.
+      </p>
+
+      <div className="mt-3 rounded-lg border border-[var(--border)]">
+        {mappings.length === 0 && (
+          <div className="px-4 py-3">
+            <p className="text-xs text-[var(--dim)]">
+              No explicit mappings. Pushes to the connected branch (<span className="font-mono">{service.branch}</span>) deploy to production;
+              all other branches are ignored unless PR deploys are on.
+            </p>
+          </div>
+        )}
+        {mappings.map((m, i) => (
+          <div key={m.id} className={`flex items-center justify-between px-4 py-3 ${i > 0 ? "border-t border-[var(--border)]" : ""}`}>
+            <div className="flex items-center gap-3">
+              <span className="font-mono text-sm text-[var(--ink)]">{m.branch}</span>
+              <span
+                className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                  m.target === "PRODUCTION"
+                    ? "border border-[var(--ok)]/40 bg-[var(--ok)]/10 text-[var(--ok)]"
+                    : "border border-[var(--border)] bg-[var(--hover)] text-[var(--dim)]"
+                }`}
+              >
+                {m.target === "PRODUCTION" ? "Production" : "Preview"}
+              </span>
+            </div>
+            <button
+              onClick={() => save(mappings.filter((x) => x.id !== m.id).map(({ branch, target }) => ({ branch, target })))}
+              disabled={saving}
+              className="text-xs text-[var(--dim)] hover:text-[var(--failed)] disabled:opacity-50"
+            >
+              Remove
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <input
+          value={newBranch}
+          onChange={(e) => setNewBranch(e.target.value)}
+          placeholder="branch name, e.g. main or feature/* literal"
+          className="w-64 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 font-mono text-sm text-[var(--ink)]"
+        />
+        <button
+          disabled={!newBranch.trim() || saving || !!productionBranch}
+          onClick={() => {
+            const branch = newBranch.trim();
+            const target = mappings.length === 0 ? "PRODUCTION" : "PREVIEW";
+            save([...mappings.map(({ branch: b, target: t }) => ({ branch: b, target: t })), { branch, target }]);
+            setNewBranch("");
+          }}
+          className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-medium text-[var(--ink)] hover:bg-[var(--hover)] disabled:opacity-50"
+        >
+          {mappings.length === 0 ? "Set as production" : "Add preview branch"}
+        </button>
+        {error && <span className="text-xs text-[var(--failed)]">{error}</span>}
       </div>
     </div>
   );

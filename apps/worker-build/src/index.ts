@@ -137,7 +137,13 @@ async function start() {
       // of building something nobody asked for.
       const deployment = await prisma.deployment.findUnique({
         where: { id: deploymentId },
-        select: { id: true, status: true, commitSha: true, service: { select: { lifecycle: true } } },
+        select: {
+          id: true,
+          status: true,
+          commitSha: true,
+          commitMessage: true,
+          service: { select: { lifecycle: true } },
+        },
       });
 
       if (!deployment) {
@@ -182,6 +188,40 @@ async function start() {
           where: { id: service.githubRepository.installationId },
         });
         const token = await createInstallationAccessToken(appJwt, installation.installationId);
+
+        // Manual deploys (POST /deployments with no webhook) have no commit
+        // metadata yet — backfill it from GitHub best-effort so the deploy
+        // list shows WHAT was built, not just the sha.
+        if (commitSha !== 'HEAD' && !deployment.commitMessage) {
+          try {
+            const res = await fetch(
+              `https://api.github.com/repos/${service.githubRepository.fullName}/commits/${commitSha}`,
+              {
+                headers: {
+                  Authorization: `Bearer ${token.token}`,
+                  Accept: 'application/vnd.github+json',
+                  'X-GitHub-Api-Version': '2022-11-28',
+                },
+              },
+            );
+            if (res.ok) {
+              const data = (await res.json()) as {
+                commit?: { message?: string };
+                author?: { login?: string } | null;
+              };
+              const message = data.commit?.message?.split('\n')[0]?.slice(0, 200) ?? null;
+              const author = data.author?.login ?? null;
+              if (message || author) {
+                await prisma.deployment.update({
+                  where: { id: deploymentId },
+                  data: { commitMessage: message, commitAuthor: author },
+                });
+              }
+            }
+          } catch (err: any) {
+            log.warn('commit metadata backfill failed', { deploymentId, error: err.message });
+          }
+        }
 
         // Download repo archive
         log.info('downloading repo archive', {

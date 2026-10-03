@@ -1,5 +1,6 @@
 import {
   Injectable,
+  BadRequestException,
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
@@ -173,6 +174,11 @@ export class ServicesService {
         branch: true,
         githubRepositoryId: true,
         deployPullRequests: true,
+        autoDeployOnConnect: true,
+        branchMappings: {
+          orderBy: [{ target: 'desc' }, { branch: 'asc' }],
+          select: { id: true, branch: true, target: true },
+        },
         dockerfilePath: true,
         buildCommand: true,
         startCommand: true,
@@ -251,6 +257,74 @@ export class ServicesService {
     });
 
     return service;
+  }
+
+  /**
+   * PATCH-style settings update — deploy-behavior toggles only. Audited.
+   */
+  async updateSettings(
+    organizationId: string,
+    projectId: string,
+    id: string,
+    dto: { autoDeployOnConnect?: boolean; deployPullRequests?: boolean },
+    actorUserId?: string,
+    actorApiKeyId?: string,
+  ) {
+    await this.findServiceForSettings(organizationId, projectId, id);
+
+    const data: Record<string, boolean> = {};
+    if (dto.autoDeployOnConnect !== undefined) data.autoDeployOnConnect = dto.autoDeployOnConnect;
+    if (dto.deployPullRequests !== undefined) data.deployPullRequests = dto.deployPullRequests;
+
+    if (Object.keys(data).length === 0) {
+      throw new BadRequestException('No supported settings provided');
+    }
+
+    const updated = await prisma.service.update({
+      where: { id },
+      data,
+      select: { id: true, autoDeployOnConnect: true, deployPullRequests: true },
+    });
+
+    this.auditLog({
+      organizationId,
+      actorUserId,
+      actorApiKeyId,
+      action: 'service.settings.update',
+      resourceId: id,
+      metadata: data,
+    });
+
+    return updated;
+  }
+
+  private async findServiceForSettings(organizationId: string, projectId: string, id: string) {
+    const service = await prisma.service.findFirst({
+      where: { id, projectId, organizationId, lifecycle: 'ACTIVE' },
+      select: { id: true },
+    });
+    if (!service) throw new NotFoundException(`Service ${id} not found`);
+    return service;
+  }
+
+  private auditLog(input: {
+    organizationId: string;
+    actorUserId?: string;
+    actorApiKeyId?: string;
+    action: string;
+    resourceId: string;
+    metadata: Record<string, unknown>;
+  }) {
+    this.audit.log({
+      organizationId: input.organizationId,
+      actorType: input.actorApiKeyId ? ActorType.API_KEY : ActorType.USER,
+      actorUserId: input.actorUserId,
+      actorApiKeyId: input.actorApiKeyId,
+      action: input.action,
+      resourceType: 'Service',
+      resourceId: input.resourceId,
+      metadata: input.metadata,
+    });
   }
 
   async remove(

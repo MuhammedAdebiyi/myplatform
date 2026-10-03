@@ -44,6 +44,10 @@ export class DeploymentsService {
     id: string;
     status: DeploymentStatus;
     commitSha: string | null;
+    commitMessage: string | null;
+    commitAuthor: string | null;
+    branch: string | null;
+    deploymentTarget: string | null;
     imageDigest: string | null;
     rollbackReason: string | null;
     createdAt: Date;
@@ -58,6 +62,10 @@ export class DeploymentsService {
             id: true,
             status: true,
             commitSha: true,
+            commitMessage: true,
+            commitAuthor: true,
+            branch: true,
+            deploymentTarget: true,
             imageDigest: true,
             rollbackReason: true,
             createdAt: true,
