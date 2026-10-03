@@ -4,6 +4,84 @@ import { useAuth } from "@/components/auth-provider";
 import Link from "next/link";
 import { useEffect, useState, use, useCallback } from "react";
 
+function timeAgo(iso: string): string {
+  const s = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+/* Shared deployment state so the header, deploy log and settings all see it. */
+function useDeployments(orgId: string, projectId: string, serviceId: string) {
+  const [deployments, setDeployments] = useState<Deployment[]>([]);
+  const [deploying, setDeploying] = useState(false);
+  const [deployError, setDeployError] = useState("");
+
+  const refresh = useCallback(async () => {
+    if (!orgId) return;
+    try {
+      const res = await fetch(`/api/proxy/organizations/${orgId}/projects/${projectId}/services/${serviceId}/deployments`);
+      if (res.ok) {
+        const data = await res.json();
+        const list: Deployment[] = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.items)
+            ? data.items
+            : [];
+        setDeployments(list);
+      }
+    } catch {
+      // ignore
+    }
+  }, [orgId, projectId, serviceId]);
+
+  const triggerDeploy = useCallback(async () => {
+    setDeployError("");
+    setDeploying(true);
+    try {
+      const res = await fetch(
+        `/api/proxy/organizations/${orgId}/projects/${projectId}/services/${serviceId}/deployments`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        },
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setDeployError(data.message || "Could not start the deployment.");
+        return false;
+      }
+      await refresh();
+      return true;
+    } catch {
+      setDeployError("Network error while starting the deployment.");
+      return false;
+    } finally {
+      setDeploying(false);
+    }
+  }, [orgId, projectId, serviceId, refresh]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  // Poll while any deployment is building
+  const hasActive = deployments.some((d) =>
+    ["PENDING", "BUILDING", "DEPLOYING"].includes(d.status),
+  );
+  useEffect(() => {
+    if (!hasActive) return;
+    const interval = setInterval(refresh, 3000);
+    return () => clearInterval(interval);
+  }, [hasActive, refresh]);
+
+  return { deployments, deploying, deployError, setDeployError, refresh, triggerDeploy };
+}
+
 type Service = {
   id: string;
   name: string;
@@ -67,20 +145,36 @@ export default function ServiceDetailPage({
   const [service, setService] = useState<Service | null>(null);
   const [tab, setTab] = useState<"log" | "env" | "settings">("log");
   const [loading, setLoading] = useState(true);
+  const orgId = activeOrg?.id ?? "";
+  const { deployments, deploying, deployError, setDeployError, refresh: refreshDeployments, triggerDeploy } =
+    useDeployments(orgId, id, serviceId);
+
+  const fetchService = useCallback(async () => {
+    if (!activeOrg) return;
+    try {
+      const res = await fetch(`/api/proxy/organizations/${activeOrg.id}/projects/${id}/services/${serviceId}`);
+      const data = await res.json();
+      setService(data);
+    } catch {
+      // keep previous state
+    } finally {
+      setLoading(false);
+    }
+  }, [activeOrg, id, serviceId]);
 
   useEffect(() => {
-    if (!activeOrg) return;
-    fetch(`/api/proxy/organizations/${activeOrg.id}/projects/${id}/services/${serviceId}`)
-      .then((r) => r.json())
-      .then((data) => {
-        setService(data);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, [activeOrg, id, serviceId]);
+    fetchService();
+  }, [fetchService]);
 
   if (loading) return <div className="py-12 text-center text-sm text-[var(--dim)]">Loading...</div>;
   if (!service) return <div className="py-12 text-center text-sm text-[var(--dim)]">Service not found.</div>;
+
+  // "Current" = the deployment that is actually serving traffic right now:
+  // the most recent healthy one. Building/pending ones are not live yet.
+  const liveDeployment = deployments.find((d) => d.status === "HEALTHY");
+  const buildingDeployment = deployments.find((d) =>
+    ["PENDING", "BUILDING", "DEPLOYING"].includes(d.status),
+  );
 
   return (
     <div>
@@ -92,7 +186,32 @@ export default function ServiceDetailPage({
         <span className="text-sm font-medium text-[var(--ink)]">{service.name}</span>
       </div>
 
-      <h1 className="font-heading text-2xl font-bold text-[var(--ink)]">{service.name}</h1>
+      <div className="flex flex-wrap items-center gap-3">
+        <h1 className="font-heading text-2xl font-bold text-[var(--ink)]">{service.name}</h1>
+        {buildingDeployment ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--bg-subtle)] px-2.5 py-1 text-xs font-medium text-[var(--dim)]">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--building)]" />
+            Deploying{buildingDeployment.commitSha ? ` ${buildingDeployment.commitSha.slice(0, 7)}` : ""}…
+          </span>
+        ) : liveDeployment ? (
+          <span
+            className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--bg-subtle)] px-2.5 py-1 text-xs font-medium text-[var(--ink)]"
+            title={`Live since ${new Date(liveDeployment.createdAt).toLocaleString()}`}
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--ok)]" />
+            Live
+            {liveDeployment.commitSha && (
+              <span className="font-mono text-[var(--dim)]">{liveDeployment.commitSha.slice(0, 7)}</span>
+            )}
+            <span className="text-[var(--dim)]">· {timeAgo(liveDeployment.createdAt)}</span>
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--bg-subtle)] px-2.5 py-1 text-xs font-medium text-[var(--dim)]">
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--dim)]" />
+            Not deployed yet
+          </span>
+        )}
+      </div>
       <p className="mt-1 text-xs text-[var(--dim)]">{service.type.replace(/_/g, " ").toLowerCase()} &middot; {service.region}</p>
 
       {/* Tabs */}
@@ -113,84 +232,59 @@ export default function ServiceDetailPage({
       </div>
 
       <div className="mt-6">
-        {tab === "log" && <DeployLog orgId={activeOrg?.id ?? ""} projectId={id} serviceId={serviceId} />}
-        {tab === "env" && <EnvVars orgId={activeOrg?.id ?? ""} projectId={id} serviceId={serviceId} />}
-        {tab === "settings" && <ServiceSettings orgId={activeOrg?.id ?? ""} serviceId={serviceId} service={service} />}
+        {tab === "log" && (
+          <DeployLog
+            orgId={orgId}
+            projectId={id}
+            serviceId={serviceId}
+            deployments={deployments}
+            deploying={deploying}
+            deployError={deployError}
+            onRefresh={refreshDeployments}
+            onTriggerDeploy={triggerDeploy}
+          />
+        )}
+        {tab === "env" && <EnvVars orgId={orgId} projectId={id} serviceId={serviceId} />}
+        {tab === "settings" && (
+          <ServiceSettings
+            orgId={orgId}
+            serviceId={serviceId}
+            service={service}
+            onServiceChanged={fetchService}
+            onTriggerDeploy={async () => {
+              const ok = await triggerDeploy();
+              if (ok) setTab("log");
+            }}
+          />
+        )}
       </div>
     </div>
   );
 }
 
 /* ─── Deploy Log Tab ─── */
-function DeployLog({ orgId, projectId, serviceId }: { orgId: string; projectId: string; serviceId: string }) {
-  const [deployments, setDeployments] = useState<Deployment[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [deploying, setDeploying] = useState(false);
-  const [deployError, setDeployError] = useState("");
-
-  const fetchDeployments = useCallback(async () => {
-    if (!orgId) return;
-    try {
-      const res = await fetch(`/api/proxy/organizations/${orgId}/projects/${projectId}/services/${serviceId}/deployments`);
-      if (res.ok) {
-        const data = await res.json();
-        const list: Deployment[] = Array.isArray(data)
-          ? data
-          : Array.isArray(data?.items)
-            ? data.items
-            : [];
-        setDeployments(list);
-      }
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false);
-    }
-  }, [orgId, projectId, serviceId]);
-
-  async function triggerDeploy() {
-    setDeployError("");
-    setDeploying(true);
-    try {
-      const res = await fetch(
-        `/api/proxy/organizations/${orgId}/projects/${projectId}/services/${serviceId}/deployments`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
-        },
-      );
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setDeployError(data.message || "Could not start the deployment.");
-        return;
-      }
-      await fetchDeployments();
-    } catch {
-      setDeployError("Network error while starting the deployment.");
-    } finally {
-      setDeploying(false);
-    }
-  }
-
-  useEffect(() => {
-    fetchDeployments();
-  }, [fetchDeployments]);
-
-  // Poll while any deployment is building
-  useEffect(() => {
-    const hasActive = deployments.some((d) =>
-      ["PENDING", "BUILDING", "DEPLOYING"].includes(d.status),
-    );
-    if (!hasActive) return;
-
-    const interval = setInterval(fetchDeployments, 3000);
-    return () => clearInterval(interval);
-  }, [deployments, fetchDeployments]);
-
-  const latest = deployments[0];
-
-  if (loading) return <div className="py-8 text-center text-sm text-[var(--dim)]">Loading deployments...</div>;
+function DeployLog({
+  orgId,
+  projectId,
+  serviceId,
+  deployments,
+  deploying,
+  deployError,
+  onRefresh,
+  onTriggerDeploy,
+}: {
+  orgId: string;
+  projectId: string;
+  serviceId: string;
+  deployments: Deployment[];
+  deploying: boolean;
+  deployError: string;
+  onRefresh: () => void;
+  onTriggerDeploy: () => Promise<boolean>;
+}) {
+  // "Current" = most recent healthy deployment (the one serving traffic).
+  const liveId = deployments.find((d) => d.status === "HEALTHY")?.id;
+  const triggerDeploy = () => onTriggerDeploy().then(() => undefined);
 
   return (
     <div>
@@ -224,7 +318,8 @@ function DeployLog({ orgId, projectId, serviceId }: { orgId: string; projectId: 
               projectId={projectId}
               serviceId={serviceId}
               isFirst={i === 0}
-              onRefresh={fetchDeployments}
+              isLive={d.id === liveId}
+              onRefresh={onRefresh}
             />
           ))}
         </div>
@@ -245,6 +340,7 @@ function DeploymentRow({
   projectId,
   serviceId,
   isFirst,
+  isLive,
   onRefresh,
 }: {
   deployment: Deployment;
@@ -252,6 +348,7 @@ function DeploymentRow({
   projectId: string;
   serviceId: string;
   isFirst: boolean;
+  isLive: boolean;
   onRefresh: () => void;
 }) {
   const [open, setOpen] = useState(isFirst);
@@ -311,6 +408,11 @@ function DeploymentRow({
           <span className="text-sm font-medium text-[var(--ink)]">
             {STATUS_LABELS[deployment.status] || deployment.status}
           </span>
+          {isLive && (
+            <span className="rounded-full border border-[var(--ok)]/40 bg-[var(--ok)]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--ok)]">
+              Current
+            </span>
+          )}
           {deployment.commitSha && (
             <span className="font-mono text-xs text-[var(--dim)]">{deployment.commitSha.slice(0, 7)}</span>
           )}
@@ -512,10 +614,14 @@ function ServiceSettings({
   orgId,
   serviceId,
   service,
+  onServiceChanged,
+  onTriggerDeploy,
 }: {
   orgId: string;
   serviceId: string;
   service: Service;
+  onServiceChanged: () => void;
+  onTriggerDeploy: () => Promise<void>;
 }) {
   const [repos, setRepos] = useState<Repo[]>([]);
   const [reposLoaded, setReposLoaded] = useState(false);
@@ -528,6 +634,12 @@ function ServiceSettings({
   const [reposError, setReposError] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [connected, setConnected] = useState(!!service.githubRepositoryId);
+  // Whether the user is pointing the service at a different repo than the
+  // currently connected one (branch-only changes are non-disruptive).
+  const isChangingRepo =
+    !!service.githubRepositoryId && !!selectedRepo && selectedRepo !== service.githubRepositoryId;
+  // After a successful connect, prompt for a fresh deploy like Vercel does.
+  const [pendingDeployPrompt, setPendingDeployPrompt] = useState(false);
 
   async function loadRepos() {
     if (reposLoaded) return;
@@ -591,6 +703,8 @@ function ServiceSettings({
       });
       if (res.ok) {
         setConnected(true);
+        setPendingDeployPrompt(true);
+        onServiceChanged();
       } else {
         const data = await res.json().catch(() => ({}));
         setConnectError(data.message || "Could not connect the repository.");
@@ -625,6 +739,11 @@ function ServiceSettings({
             >
               Change repository or branch
             </button>
+            <p className="mt-2 text-xs text-[var(--dim)]">
+              You can change the connection at any time — nothing is locked. Existing deployments
+              keep running their current build; your new repo/branch only takes effect on the
+              next deploy.
+            </p>
           </div>
         ) : (
           <div className="mt-2">
@@ -637,6 +756,17 @@ function ServiceSettings({
 
             {reposLoaded && (
               <form onSubmit={connectRepo} className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--bg-subtle)] p-4">
+                {isChangingRepo && (
+                  <div className="mb-3 rounded-lg border border-[var(--failed)]/30 bg-[var(--failed)]/5 px-4 py-3">
+                    <p className="text-sm font-medium text-[var(--ink)]">You're switching repositories</p>
+                    <p className="mt-1 text-xs text-[var(--dim)]">
+                      Nothing breaks when you connect — but the currently running container keeps
+                      serving the <span className="font-medium text-[var(--ink)]">old repo's build</span> (same
+                      image, same domains) until you deploy the new repository. Domains and env vars stay
+                      in place; only the next deploy changes what's running.
+                    </p>
+                  </div>
+                )}
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
                     <label className="mb-1 block text-xs font-medium text-[var(--dim)]">Repository</label>
@@ -699,6 +829,33 @@ function ServiceSettings({
                   )}
                 </div>
               </form>
+            )}
+
+            {connected && pendingDeployPrompt && (
+              <div className="mt-3 rounded-lg border border-[var(--accent)]/40 bg-[var(--accent)]/5 px-4 py-3">
+                <p className="text-sm font-medium text-[var(--ink)]">Connection updated</p>
+                <p className="mt-1 text-xs text-[var(--dim)]">
+                  The running container is still serving the previous build. Trigger a fresh
+                  deploy to build from {service.repoUrl} ({service.branch}).
+                </p>
+                <div className="mt-3 flex items-center gap-3">
+                  <button
+                    onClick={async () => {
+                      setPendingDeployPrompt(false);
+                      await onTriggerDeploy();
+                    }}
+                    className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-contrast)] hover:opacity-90"
+                  >
+                    Deploy now
+                  </button>
+                  <button
+                    onClick={() => setPendingDeployPrompt(false)}
+                    className="text-xs font-medium text-[var(--dim)] hover:text-[var(--ink)]"
+                  >
+                    Not now
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         )}
