@@ -1,7 +1,8 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ServicesService } from './services.service.js';
 import { CreateServiceDto } from './dto/create-service.dto.js';
 import { CreateEnvVarDto } from './dto/create-env-var.dto.js';
+import { UpdateServiceSettingsDto } from './dto/update-service-settings.dto.js';
 import { SessionGuard } from '../auth/guards/session.guard.js';
 import { ApiKeyGuard } from '../auth/guards/api-key.guard.js';
 import { EmailVerifiedGuard } from '../auth/guards/email-verified.guard.js';
@@ -94,6 +95,25 @@ export class ServicesController {
     @AuthContext() auth: AuthContextType,
   ) {
     return this.services.create(organizationId, projectId, dto, auth.actorUserId, auth.actorApiKeyId);
+  }
+
+  @Patch(':id/settings')
+  @RequirePermissions(Permission.SERVICE_UPDATE)
+  updateSettings(
+    @GetOrganizationId() organizationId: string,
+    @Param('projectId') projectId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateServiceSettingsDto,
+    @AuthContext() auth: AuthContextType,
+  ) {
+    return this.services.updateSettings(
+      organizationId,
+      projectId,
+      id,
+      dto,
+      auth.actorUserId,
+      auth.actorApiKeyId,
+    );
   }
 
   @Delete(':id')

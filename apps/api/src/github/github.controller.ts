@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Patch,
+  Put,
   Post,
   Param,
   Query,
@@ -22,6 +23,7 @@ import { Permission } from '../rbac/permissions.js';
 import { WebhookGuard } from './guards/webhook.guard.js';
 import { ConnectServiceDto } from './dto/connect-service.dto.js';
 import { CompleteInstallationDto } from './dto/complete-installation.dto.js';
+import { SetBranchMappingsDto } from './dto/set-branch-mappings.dto.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import type { CurrentUser as CurrentUserType } from '../auth/decorators/current-user.decorator.js';
 
@@ -203,6 +205,31 @@ export class GitHubController {
       serviceId,
       dto.githubRepositoryId,
       dto.branch,
+    );
+  }
+
+  @UseGuards(SessionGuard, EmailVerifiedGuard, ApiKeyGuard, OrganizationGuard)
+  @RequirePermissions(Permission.SERVICE_READ)
+  @Get('organizations/:organizationId/github/services/:id/branch-mappings')
+  async listBranchMappings(
+    @GetOrganizationId() organizationId: string,
+    @Param('id') serviceId: string,
+  ) {
+    return this.githubService.listBranchMappings(organizationId, serviceId);
+  }
+
+  @UseGuards(SessionGuard, EmailVerifiedGuard, ApiKeyGuard, OrganizationGuard)
+  @RequirePermissions(Permission.SERVICE_UPDATE)
+  @Put('organizations/:organizationId/github/services/:id/branch-mappings')
+  async setBranchMappings(
+    @GetOrganizationId() organizationId: string,
+    @Param('id') serviceId: string,
+    @Body() dto: SetBranchMappingsDto,
+  ) {
+    return this.githubService.setBranchMappings(
+      organizationId,
+      serviceId,
+      dto.mappings,
     );
   }
 }

@@ -350,6 +350,9 @@ model Service {
   branch         String?
   // PR preview deployments (push events always deploy; PRs are opt-in)
   deployPullRequests Boolean @default(false)
+  // Vercel-style: when true, connecting a new repo/branch kicks off a deploy
+  // immediately instead of waiting for the user to press Deploy.
+  autoDeployOnConnect Boolean @default(false)
   githubRepositoryId String?
   githubRepository   GitHubRepository? @relation(fields: [githubRepositoryId], references: [id])
   dockerfilePath String?
@@ -371,6 +374,7 @@ model Service {
   domains     Domain[]
   healthCheck HealthCheck?
   deployments Deployment[]
+  branchMappings ServiceBranchMapping[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -446,6 +450,14 @@ model Deployment {
   status          DeploymentStatus @default(PENDING)
   imageDigest     String?
   commitSha       String?
+  // Commit metadata captured from GitHub at deploy time (webhook or manual
+  // deploy) so the deploy list can show WHAT was built, not just a sha.
+  commitMessage   String?
+  commitAuthor    String?
+  // Branch the deploy was built from; null for rollbacks and pre-mapping deploys.
+  branch          String?
+  // production | preview — which lane this deploy belongs to (branch mappings).
+  deploymentTarget String?
   previousRelease String?
   configSnapshot  Json?
   rollbackReason  String?
@@ -454,6 +466,28 @@ model Deployment {
   updatedAt       DateTime         @updatedAt
 
   @@index([serviceId, createdAt])
+}
+
+// Vercel-style branch mappings: the production branch deploys to the live
+// domains; any other pushed branch matching a preview pattern deploys as a
+// preview (no production traffic). A service may have multiple mappings.
+model ServiceBranchMapping {
+  id        String  @id @default(cuid())
+  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  serviceId String
+  branch    String
+  // PRODUCTION | PREVIEW — exactly one PRODUCTION mapping per service.
+  target    BranchMappingTarget @default(PREVIEW)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([serviceId, branch])
+  @@index([serviceId])
+}
+
+enum BranchMappingTarget {
+  PRODUCTION
+  PREVIEW
 }
 
 model EmailVerificationCode {
