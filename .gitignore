@@ -5,3 +5,6 @@ dist
 *.log
 .turbo
 .DS_Store
+
+# Codebuff local cache
+.freebuff/
