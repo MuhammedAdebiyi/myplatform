@@ -8,3 +8,6 @@ dist
 
 # Codebuff local cache
 .freebuff/
+
+# Local tool caches
+.cloud-attachments/
