@@ -6,20 +6,15 @@ import { Suspense, useEffect, useRef, useState } from "react";
 function CallbackInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const installationId = searchParams.get("installation_id");
+  const state = searchParams.get("state");
+  const missingParams = !installationId || !state;
   const [error, setError] = useState<string | null>(null);
   const ran = useRef(false);
 
   useEffect(() => {
-    if (ran.current) return;
+    if (missingParams || ran.current) return;
     ran.current = true;
-
-    const installationId = searchParams.get("installation_id");
-    const state = searchParams.get("state");
-
-    if (!installationId || !state) {
-      setError("Missing installation parameters.");
-      return;
-    }
 
     (async () => {
       try {
@@ -42,7 +37,21 @@ function CallbackInner() {
         setError("Network error while completing the installation.");
       }
     })();
-  }, [router, searchParams]);
+  }, [router, searchParams, missingParams, installationId, state]);
+
+  if (missingParams) {
+    return (
+      <div className="py-20 text-center">
+        <p className="text-sm text-[var(--failed)]">Missing installation parameters.</p>
+        <a
+          href="/settings/github"
+          className="mt-4 inline-block rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-contrast)]"
+        >
+          Back to settings
+        </a>
+      </div>
+    );
+  }
 
   return (
     <div className="py-20 text-center">

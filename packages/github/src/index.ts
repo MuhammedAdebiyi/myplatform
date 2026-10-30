@@ -80,9 +80,10 @@ export async function createInstallationAccessToken(
 
 export interface GitHubInstallationInfo {
   id: number;
-  account: { login: string; type: string };
+  account: { id: number; login: string; type: string };
   target_type: string;
   repository_selection: string;
+  suspended_at: string | null;
 }
 
 /**
@@ -113,6 +114,41 @@ export async function getInstallationInfo(
   }
 
   return response.json() as Promise<GitHubInstallationInfo>;
+}
+
+export interface GitHubAppInstallationSummary {
+  id: number;
+  account: { id: number; login: string; type: string };
+  suspended_at: string | null;
+}
+
+/**
+ * List every installation of this GitHub App (App JWT auth).
+ * Used by the "connect your existing installation" flow to find installs
+ * owned by the caller's GitHub identity.
+ */
+export async function listAppInstallations(
+  appJwt: string,
+): Promise<GitHubAppInstallationSummary[]> {
+  const response = await fetch(
+    'https://api.github.com/app/installations?per_page=100',
+    {
+      headers: {
+        Authorization: `Bearer ${appJwt}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+    },
+  );
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(
+      `GitHub list app installations failed (${response.status}): ${body}`,
+    );
+  }
+
+  return response.json() as Promise<GitHubAppInstallationSummary[]>;
 }
 
 export interface GitHubInstallationReposResponse {

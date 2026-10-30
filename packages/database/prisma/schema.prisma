@@ -269,7 +269,7 @@ model GitHubInstallation {
   id             String       @id @default(cuid())
   organization   Organization @relation(fields: [organizationId], references: [id])
   organizationId String
-  installationId Int          @unique
+  installationId Int
   accountLogin   String
   accountType    String       // "User" or "Organization"
   suspendedAt    DateTime?
@@ -278,6 +278,7 @@ model GitHubInstallation {
 
   repositories GitHubRepository[]
 
+  @@unique([organizationId, installationId])
   @@index([organizationId])
 }
 
@@ -285,7 +286,7 @@ model GitHubRepository {
   id                String            @id @default(cuid())
   installation      GitHubInstallation @relation(fields: [installationId], references: [id])
   installationId    String
-  githubRepoId      BigInt            @unique
+  githubRepoId      BigInt
   name              String
   fullName          String
   private           Boolean
@@ -295,6 +296,7 @@ model GitHubRepository {
 
   services Service[]
 
+  @@unique([installationId, githubRepoId])
   @@index([installationId])
 }
 

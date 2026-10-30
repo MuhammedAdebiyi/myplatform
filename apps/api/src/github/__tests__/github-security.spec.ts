@@ -14,10 +14,13 @@ jest.mock('@myplatform/database', () => {
       },
       gitHubInstallation: {
         findUnique: jest.fn(),
+        findMany: jest.fn(),
         findUniqueOrThrow: jest.fn(),
         upsert: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(),
         delete: jest.fn(),
+        deleteMany: jest.fn(),
       },
       gitHubRepository: {
         findFirst: jest.fn(),
@@ -148,7 +151,6 @@ describe('GitHub Integration Security (RULE 33 adversarial tests)', () => {
         id: 'inst-1',
         installationId: 12345,
       });
-      (prisma.gitHubRepository.findMany as jest.Mock).mockResolvedValueOnce([]);
       (prisma.gitHubRepository.deleteMany as jest.Mock).mockResolvedValueOnce({});
 
       const { createInstallationAccessToken, listInstallationRepos } = await import('@myplatform/github');
@@ -225,10 +227,13 @@ describe('GitHub Integration Security (RULE 33 adversarial tests)', () => {
   describe('Adversarial: Push to unconnected repo', () => {
     it('creates no deployment when push is to a repo with no connected services', async () => {
       // Repo exists but no services reference it
-      (prisma.gitHubRepository.findFirst as jest.Mock).mockResolvedValueOnce({
-        id: 'repo-1',
-        fullName: 'myorg/myrepo',
-      });
+      (prisma.gitHubRepository.findMany as jest.Mock).mockResolvedValueOnce([
+        {
+          id: 'repo-1',
+          fullName: 'myorg/myrepo',
+          installation: { suspendedAt: null },
+        },
+      ]);
       (prisma.service.findMany as jest.Mock).mockResolvedValueOnce([]);
 
       await githubService.handlePushEvent({
@@ -241,7 +246,7 @@ describe('GitHub Integration Security (RULE 33 adversarial tests)', () => {
     });
 
     it('creates no deployment when push is to a repo not tracked at all', async () => {
-      (prisma.gitHubRepository.findFirst as jest.Mock).mockResolvedValueOnce(null);
+      (prisma.gitHubRepository.findMany as jest.Mock).mockResolvedValueOnce([]);
 
       await githubService.handlePushEvent({
         ref: 'refs/heads/main',
@@ -254,10 +259,13 @@ describe('GitHub Integration Security (RULE 33 adversarial tests)', () => {
     });
 
     it('creates deployment only for matching branch, not other branches', async () => {
-      (prisma.gitHubRepository.findFirst as jest.Mock).mockResolvedValueOnce({
-        id: 'repo-1',
-        fullName: 'myorg/myrepo',
-      });
+      (prisma.gitHubRepository.findMany as jest.Mock).mockResolvedValueOnce([
+        {
+          id: 'repo-1',
+          fullName: 'myorg/myrepo',
+          installation: { suspendedAt: null },
+        },
+      ]);
       // Service is connected to repo-1 but on branch "develop", not "main"
       (prisma.service.findMany as jest.Mock).mockResolvedValueOnce([]);
 
@@ -273,7 +281,7 @@ describe('GitHub Integration Security (RULE 33 adversarial tests)', () => {
 
   describe('Adversarial: Installation webhook for unknown installation', () => {
     it('does not create installation when webhook has no org mapping', async () => {
-      (prisma.gitHubInstallation.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.gitHubInstallation.findMany as jest.Mock).mockResolvedValue([]);
 
       await githubService.handleInstallationEvent({
         action: 'created',
@@ -282,20 +290,18 @@ describe('GitHub Integration Security (RULE 33 adversarial tests)', () => {
 
       // Should warn and return, not crash or create orphaned records
       expect(prisma.gitHubInstallation.upsert).not.toHaveBeenCalled();
+      expect(prisma.gitHubInstallation.updateMany).not.toHaveBeenCalled();
     });
 
     it('handles deleted installation gracefully', async () => {
-      (prisma.gitHubInstallation.findUnique as jest.Mock).mockResolvedValue({
-        id: 'inst-1',
-      });
-      (prisma.gitHubInstallation.delete as jest.Mock).mockResolvedValue({});
+      (prisma.gitHubInstallation.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
 
       await githubService.handleInstallationEvent({
         action: 'deleted',
         installation: { id: 12345, account: { login: 'myorg', type: 'Organization' } },
       });
 
-      expect(prisma.gitHubInstallation.delete).toHaveBeenCalledWith({
+      expect(prisma.gitHubInstallation.deleteMany).toHaveBeenCalledWith({
         where: { installationId: 12345 },
       });
     });

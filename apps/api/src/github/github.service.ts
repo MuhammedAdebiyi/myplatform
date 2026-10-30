@@ -4,9 +4,11 @@ import {
   generateAppJwt,
   getInstallationInfo,
   listInstallationRepos,
+  listAppInstallations,
   listBranches,
   createInstallationAccessToken,
   type GitHubAppConfig,
+  type GitHubAppInstallationSummary,
 } from '@myplatform/github';
 import { AuditService } from '../audit/audit.service.js';
 import { createQueue } from '@myplatform/queue';
@@ -121,7 +123,9 @@ export class GitHubService {
     const installationInfo = await getInstallationInfo(appJwt, installationId);
 
     await prisma.gitHubInstallation.upsert({
-      where: { installationId },
+      where: {
+        organizationId_installationId: { organizationId, installationId },
+      },
       create: {
         organizationId,
         installationId,
@@ -129,14 +133,13 @@ export class GitHubService {
         accountType: installationInfo.account.type,
       },
       update: {
-        organizationId,
         accountLogin: installationInfo.account.login,
         accountType: installationInfo.account.type,
         suspendedAt: null,
       },
     });
 
-    await this.syncRepos(installationId);
+    await this.syncRepos(installationId, organizationId);
     await prisma.installationState.delete({ where: { state } });
 
     this.audit.log({
@@ -189,7 +192,9 @@ export class GitHubService {
     }
 
     await prisma.gitHubInstallation.upsert({
-      where: { installationId },
+      where: {
+        organizationId_installationId: { organizationId, installationId },
+      },
       create: {
         organizationId,
         installationId,
@@ -197,14 +202,13 @@ export class GitHubService {
         accountType: installationInfo.account.type,
       },
       update: {
-        organizationId,
         accountLogin: installationInfo.account.login,
         accountType: installationInfo.account.type,
         suspendedAt: null,
       },
     });
 
-    await this.syncRepos(installationId);
+    await this.syncRepos(installationId, organizationId);
 
     this.audit.log({
       organizationId,
@@ -216,7 +220,7 @@ export class GitHubService {
     });
   }
 
-  async syncRepos(installationId: number): Promise<void> {
+  async syncRepos(installationId: number, organizationId: string): Promise<void> {
     const config = getGitHubAppConfig();
     const appJwt = generateAppJwt(config);
     const token = await createInstallationAccessToken(appJwt, installationId);
@@ -224,7 +228,7 @@ export class GitHubService {
     const repos = await listInstallationRepos(token.token);
 
     const installation = await prisma.gitHubInstallation.findUniqueOrThrow({
-      where: { installationId },
+      where: { organizationId_installationId: { organizationId, installationId } },
     });
 
     const githubRepoIds = repos.repositories.map((r) => BigInt(r.id));
@@ -267,7 +271,12 @@ export class GitHubService {
         : []),
       ...toUpdate.map((repo) =>
         prisma.gitHubRepository.update({
-          where: { githubRepoId: BigInt(repo.id) },
+          where: {
+            installationId_githubRepoId: {
+              installationId: installation.id,
+              githubRepoId: BigInt(repo.id),
+            },
+          },
           data: {
             name: repo.name,
             fullName: repo.full_name,
@@ -387,6 +396,136 @@ export class GitHubService {
       suspended: installation.suspendedAt !== null,
       repositoryCount: installation.repositories.length,
     };
+  }
+
+  /**
+   * Installations of this GitHub App that belong to the caller's own GitHub
+   * identity (matched via their stored GITHUB AccountIdentity). Lets the UI
+   * offer "connect the install you already have" when the redirect flow never
+   * landed (expired state, already-installed account, dead Setup URL…).
+   */
+  async listInstallationCandidates(organizationId: string, userId: string) {
+    const identity = await prisma.accountIdentity.findFirst({
+      where: { userId, provider: 'GITHUB' },
+      select: { providerAccountId: true },
+    });
+    if (!identity) return [];
+
+    const config = getGitHubAppConfig();
+    const appJwt = generateAppJwt(config);
+
+    let installations: GitHubAppInstallationSummary[];
+    try {
+      installations = await listAppInstallations(appJwt);
+    } catch (err) {
+      this.logger.error({ err }, 'Failed to list GitHub installations');
+      throw new BadRequestException('Could not reach GitHub. Try again.');
+    }
+
+    const githubAccountId = Number(identity.providerAccountId);
+    const owned = installations.filter(
+      (i) => i.account.id === githubAccountId && !i.suspended_at,
+    );
+    if (owned.length === 0) return [];
+
+    const linkedRows = await prisma.gitHubInstallation.findMany({
+      where: { installationId: { in: owned.map((i) => i.id) } },
+      select: {
+        installationId: true,
+        organization: { select: { id: true, name: true } },
+      },
+    });
+    const linkedByInstall = new Map(
+      linkedRows.map((l) => [l.installationId, l.organization]),
+    );
+
+    return owned.map((i) => {
+      const linkedOrg = linkedByInstall.get(i.id) ?? null;
+      return {
+        installationId: i.id,
+        accountLogin: i.account.login,
+        accountType: i.account.type,
+        linkedOrganizationId: linkedOrg?.id ?? null,
+        linkedOrganizationName: linkedOrg?.name ?? null,
+      };
+    });
+  }
+
+  /**
+   * Link an existing GitHub App installation (owned by the caller's GitHub
+   * identity) to this organization. Idempotent — re-running refreshes the
+   * account metadata and re-syncs repositories.
+   */
+  async adoptInstallation(
+    organizationId: string,
+    userId: string,
+    installationId: number,
+  ): Promise<{ organizationId: string; accountLogin: string }> {
+    const membership = await prisma.membership.findUnique({
+      where: { userId_organizationId: { userId, organizationId } },
+      select: { id: true },
+    });
+    if (!membership) {
+      throw new UnauthorizedException('You are not a member of this organization');
+    }
+
+    const identity = await prisma.accountIdentity.findFirst({
+      where: { userId, provider: 'GITHUB' },
+      select: { providerAccountId: true },
+    });
+    if (!identity) {
+      throw new UnauthorizedException(
+        'No GitHub account is linked to your myplatform account',
+      );
+    }
+
+    const config = getGitHubAppConfig();
+    const appJwt = generateAppJwt(config);
+
+    let info;
+    try {
+      info = await getInstallationInfo(appJwt, installationId);
+    } catch {
+      throw new NotFoundException('GitHub installation not found');
+    }
+
+    if (info.account.id !== Number(identity.providerAccountId)) {
+      throw new UnauthorizedException(
+        'This GitHub installation belongs to a different GitHub account',
+      );
+    }
+    if (info.suspended_at) {
+      throw new BadRequestException('This GitHub installation is suspended');
+    }
+
+    await prisma.gitHubInstallation.upsert({
+      where: { organizationId_installationId: { organizationId, installationId } },
+      create: {
+        organizationId,
+        installationId,
+        accountLogin: info.account.login,
+        accountType: info.account.type,
+      },
+      update: {
+        accountLogin: info.account.login,
+        accountType: info.account.type,
+        suspendedAt: null,
+      },
+    });
+
+    await this.syncRepos(installationId, organizationId);
+
+    this.audit.log({
+      organizationId,
+      actorType: ActorType.USER,
+      actorUserId: userId,
+      action: 'github.installation.adopt',
+      resourceType: 'GitHubInstallation',
+      resourceId: undefined,
+      metadata: { installationId, accountLogin: info.account.login, via: 'existing-installation' },
+    });
+
+    return { organizationId, accountLogin: info.account.login };
   }
 
   /**
@@ -620,21 +759,14 @@ export class GitHubService {
     const installationId = installation.id;
 
     if (action === 'created') {
-      const existing = await prisma.gitHubInstallation.findUnique({
+      // One GitHub installation may be linked by several platform orgs —
+      // refresh every org-scoped row that references it.
+      const rows = await prisma.gitHubInstallation.findMany({
         where: { installationId },
         select: { organizationId: true },
       });
 
-      if (existing) {
-        await prisma.gitHubInstallation.update({
-          where: { installationId },
-          data: {
-            accountLogin: installation.account.login,
-            accountType: installation.account.type,
-            suspendedAt: null,
-          },
-        });
-      } else {
+      if (rows.length === 0) {
         this.logger.warn(
           { installationId },
           'Installation webhook for unknown installation — no org mapping yet',
@@ -642,16 +774,20 @@ export class GitHubService {
         return;
       }
 
-      await this.syncRepos(installationId);
-    } else if (action === 'deleted') {
-      const existing = await prisma.gitHubInstallation.findUnique({
+      await prisma.gitHubInstallation.updateMany({
         where: { installationId },
-        select: { id: true },
+        data: {
+          accountLogin: installation.account.login,
+          accountType: installation.account.type,
+          suspendedAt: null,
+        },
       });
 
-      if (existing) {
-        await prisma.gitHubInstallation.delete({ where: { installationId } });
+      for (const row of rows) {
+        await this.syncRepos(installationId, row.organizationId);
       }
+    } else if (action === 'deleted') {
+      await prisma.gitHubInstallation.deleteMany({ where: { installationId } });
     } else if (action === 'suspend' || action === 'unsuspend') {
       const suspendedAt = action === 'suspend' ? new Date() : null;
       await prisma.gitHubInstallation.updateMany({
@@ -664,7 +800,13 @@ export class GitHubService {
 
   async handleInstallationReposEvent(payload: InstallationReposEventPayload) {
     const { installation } = payload;
-    await this.syncRepos(installation.id);
+    const rows = await prisma.gitHubInstallation.findMany({
+      where: { installationId: installation.id },
+      select: { organizationId: true },
+    });
+    for (const row of rows) {
+      await this.syncRepos(installation.id, row.organizationId);
+    }
   }
 
   async handlePushEvent(payload: PushEventPayload) {
@@ -679,26 +821,32 @@ export class GitHubService {
     const branch = ref.replace('refs/heads/', '');
     const commitSha = payload.after;
 
-    const repo = await prisma.gitHubRepository.findFirst({
+    // The same GitHub repo can be linked by several orgs (shared install) —
+    // match every org-scoped row so pushes deploy services on all of them.
+    const repoRows = await prisma.gitHubRepository.findMany({
       where: { fullName: repoFullName },
       include: { installation: { select: { suspendedAt: true } } },
     });
 
-    if (!repo) return;
-    // Suspended installations must not trigger builds — GitHub stops sending
-    // webhooks on suspend, but in-flight/queued deliveries can still arrive.
-    // A repo with no resolvable installation is treated as suspended too.
-    if (repo.installation?.suspendedAt ?? true) return;
+    if (repoRows.length === 0) return;
+    const repoRowById = new Map(repoRows.map((r) => [r.id, r]));
 
     const services = await prisma.service.findMany({
       where: {
-        githubRepositoryId: repo.id,
+        githubRepositoryId: { in: repoRows.map((r) => r.id) },
         branch,
       },
       include: { branchMappings: true },
     });
 
     for (const service of services) {
+      // Suspended installations must not trigger builds — GitHub stops sending
+      // webhooks on suspend, but in-flight/queued deliveries can still arrive.
+      // A repo with no resolvable installation is treated as suspended too.
+      const repoRow = service.githubRepositoryId
+        ? repoRowById.get(service.githubRepositoryId)
+        : undefined;
+      if (repoRow?.installation?.suspendedAt ?? true) continue;
       // Branch-mapping routing (Vercel model): if the pushed branch has an
       // explicit mapping it wins (production vs preview); otherwise the
       // service's connected branch behaves as production (legacy compat) and

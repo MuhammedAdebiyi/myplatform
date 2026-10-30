@@ -40,6 +40,14 @@ export class OrganizationsController {
     return this.organizations.update(organizationId, user.id, dto);
   }
 
+  @Get(':organizationId/members')
+  listMembers(
+    @Param('organizationId') organizationId: string,
+    @CurrentUser() user: CurrentUserType,
+  ) {
+    return this.organizations.listMembers(organizationId, user.id);
+  }
+
   @Post(':organizationId/members')
   addMember(
     @Param('organizationId') organizationId: string,

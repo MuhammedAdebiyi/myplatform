@@ -23,6 +23,7 @@ import { Permission } from '../rbac/permissions.js';
 import { WebhookGuard } from './guards/webhook.guard.js';
 import { ConnectServiceDto } from './dto/connect-service.dto.js';
 import { CompleteInstallationDto } from './dto/complete-installation.dto.js';
+import { AdoptInstallationDto } from './dto/adopt-installation.dto.js';
 import { SetBranchMappingsDto } from './dto/set-branch-mappings.dto.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import type { CurrentUser as CurrentUserType } from '../auth/decorators/current-user.decorator.js';
@@ -171,6 +172,36 @@ export class GitHubController {
     @GetOrganizationId() organizationId: string,
   ) {
     return this.githubService.getInstallationStatus(organizationId);
+  }
+
+  /**
+   * GitHub App installations owned by the caller's own GitHub identity —
+   * the "you already have this installed, connect it here" escape hatch
+   * when the state/redirect flow never completed.
+   */
+  @UseGuards(SessionGuard, EmailVerifiedGuard, ApiKeyGuard, OrganizationGuard)
+  @RequirePermissions(Permission.SERVICE_READ)
+  @Get('organizations/:organizationId/github/installation/candidates')
+  async installationCandidates(
+    @GetOrganizationId() organizationId: string,
+    @CurrentUser() user: CurrentUserType,
+  ) {
+    return this.githubService.listInstallationCandidates(organizationId, user.id);
+  }
+
+  @UseGuards(SessionGuard, EmailVerifiedGuard, ApiKeyGuard, OrganizationGuard)
+  @RequirePermissions(Permission.SERVICE_UPDATE)
+  @Post('organizations/:organizationId/github/installations/adopt')
+  async adoptInstallation(
+    @GetOrganizationId() organizationId: string,
+    @CurrentUser() user: CurrentUserType,
+    @Body() dto: AdoptInstallationDto,
+  ) {
+    return this.githubService.adoptInstallation(
+      organizationId,
+      user.id,
+      dto.installationId,
+    );
   }
 
   @UseGuards(SessionGuard, EmailVerifiedGuard, ApiKeyGuard, OrganizationGuard)

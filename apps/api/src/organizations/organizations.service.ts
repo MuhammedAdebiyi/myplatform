@@ -112,6 +112,31 @@ export class OrganizationsService {
     }));
   }
 
+  async listMembers(organizationId: string, actorUserId: string) {
+    const actorMembership = await prisma.membership.findUnique({
+      where: {
+        userId_organizationId: { userId: actorUserId, organizationId },
+      },
+      select: { id: true },
+    });
+    if (!actorMembership) {
+      throw new ForbiddenException('Not a member of this organization');
+    }
+
+    const members = await prisma.membership.findMany({
+      where: { organizationId },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true,
+        userId: true,
+        role: true,
+        createdAt: true,
+        user: { select: { id: true, name: true, email: true } },
+      },
+    });
+    return { items: members };
+  }
+
   async addMember(
     organizationId: string,
     inviterUserId: string,
